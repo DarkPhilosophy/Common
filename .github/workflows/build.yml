@@ -49,70 +49,13 @@ jobs:
         }
       shell: pwsh
     
-    - name: Install Newtonsoft.Json package
+    - name: Create NuGet.Config
       run: |
-        dotnet add package Newtonsoft.Json --version 13.0.3
-      shell: pwsh
-    
-    - name: Restore NuGet packages
-      run: |
-        nuget restore Common.csproj
-      shell: pwsh
-      continue-on-error: true
-    
-    - name: Build with MSBuild (All Frameworks)
-      id: build
-      run: |
-        msbuild Common.csproj /p:Configuration=Release /p:Platform="Any CPU" /verbosity:detailed
-        echo "build_exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
-      shell: pwsh
-      continue-on-error: true
-    
-    - name: Check build status
-      if: steps.build.outputs.build_exit_code != '0'
-      run: |
-        echo "::error::Build failed with exit code ${{ steps.build.outputs.build_exit_code }}"
-        exit 1
-      shell: pwsh
-    
-    - name: Find all build outputs
-      run: |
-        echo "All build outputs:"
-        Get-ChildItem -Path . -Include *.dll -Recurse | Select-Object FullName
-      shell: pwsh
-    
-    - name: Create output directories and copy files
-      run: |
-        mkdir -p output
-        
-        # Find all DLL files and copy them to output
-        $dllFiles = Get-ChildItem -Path . -Include *.dll -Recurse | Where-Object { $_.FullName -notlike "*\\packages\\*" }
-        if ($dllFiles.Count -gt 0) {
-          foreach ($file in $dllFiles) {
-            $destPath = Join-Path "output" $file.Name
-            Copy-Item -Path $file.FullName -Destination $destPath -Force
-            echo "Copied DLL: $($file.FullName) to $destPath"
-          }
-        } else {
-          echo "No DLL files found to copy!"
-          exit 1
-        }
-      shell: pwsh
-    
-    - name: List output directory
-      run: |
-        echo "Output directory contents:"
-        if (Test-Path output) {
-          Get-ChildItem -Path output -Recurse
-        } else {
-          echo "Output directory not found!"
-          exit 1
-        }
-      shell: pwsh
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: Common-build-outputs
-        path: output/
-        if-no-files-found: error
+        Set-Content -Path NuGet.Config -Value @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+</configuration>
