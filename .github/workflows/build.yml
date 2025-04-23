@@ -12,10 +12,10 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
           4.8.x
@@ -35,19 +35,19 @@ jobs:
       run: dotnet build --configuration Release --framework net9.0-windows --no-restore
     
     - name: Upload .NET Framework 4.8 build
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Common-net48
         path: bin/Release/net48/
     
     - name: Upload .NET 6.0 build
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Common-net6.0
         path: bin/Release/net6.0-windows/
     
     - name: Upload .NET 9.0 build
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Common-net9.0
         path: bin/Release/net9.0-windows/
