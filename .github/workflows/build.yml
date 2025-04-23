@@ -45,21 +45,21 @@ jobs:
     - name: Build with dotnet (.NET Framework 4.8)
       run: |
         dotnet build Common.csproj --configuration Release --framework net48
-        echo "Build exit code: 0"
+        echo "Build exit code: $LASTEXITCODE"
       shell: pwsh
       continue-on-error: true
     
     - name: Build with dotnet (.NET 6.0)
       run: |
         dotnet build Common.csproj --configuration Release --framework net6.0-windows
-        echo "Build exit code: 0"
+        echo "Build exit code: $LASTEXITCODE"
       shell: pwsh
       continue-on-error: true
     
     - name: Build with dotnet (.NET 8.0)
       run: |
         dotnet build Common.csproj --configuration Release --framework net8.0-windows
-        echo "Build exit code: 0"
+        echo "Build exit code: $LASTEXITCODE"
       shell: pwsh
       continue-on-error: true
     
@@ -74,12 +74,12 @@ jobs:
         mkdir -p output
         
         # Find and copy any DLL files
-         = Get-ChildItem -Path . -Filter *.dll -Recurse
-        if (.Count -gt 0) {
-          foreach ( in ) {
-             = Join-Path "output" .Name
-            Copy-Item -Path .FullName -Destination  -Force
-            echo "Copied  to "
+        $dllFiles = Get-ChildItem -Path . -Filter *.dll -Recurse
+        if ($dllFiles.Count -gt 0) {
+          foreach ($file in $dllFiles) {
+            $destPath = Join-Path "output" $file.Name
+            Copy-Item -Path $file.FullName -Destination $destPath -Force
+            echo "Copied $($file.FullName) to $destPath"
           }
         } else {
           echo "No DLL files found to copy"
