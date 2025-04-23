@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net48;net6.0-windows;net9.0-windows</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <PublishTrimmed>false</PublishTrimmed>
+    <TrimMode>link</TrimMode>
+  </PropertyGroup>
+
+  <!-- Enable nullable reference types only for .NET 6.0 and .NET 9.0 -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Disable nullable reference types for .NET Framework 4.8 -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <!-- Framework-specific properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <LangVersion>7.3</LangVersion>
+    <DefineConstants>NET48;NETFRAMEWORK</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+    <LangVersion>latest</LangVersion>
+    <DefineConstants>NET6_0_OR_GREATER</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Framework-specific package references -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!-- For .NET 6.0 and .NET 9.0, use Newtonsoft.Json as well for consistency -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
