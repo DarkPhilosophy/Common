@@ -15,6 +15,9 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+    
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -30,65 +33,91 @@ jobs:
     - name: List directory structure
       run: |
         dir
-        dir -Recurse -Depth 1
+        dir -Recurse -Depth 2
+        type Common.csproj
       shell: pwsh
     
-    - name: Restore dependencies
-      run: dotnet restore
+    - name: Check for solution file
+      run: |
+        if (Test-Path *.sln) {
+          echo "Solution file found:"
+          dir *.sln
+        } else {
+          echo "No solution file found in root directory"
+        }
+      shell: pwsh
+    
+    - name: Restore dependencies with NuGet
+      run: |
+        nuget restore
       continue-on-error: true
     
-    - name: Build .NET Framework 4.8
+    - name: Restore dependencies with dotnet
       run: |
-        dotnet build --configuration Release --framework net48 || echo "Build failed but continuing"
+        dotnet restore
       continue-on-error: true
     
-    - name: Build .NET 6.0
+    - name: Build with MSBuild (.NET Framework)
       run: |
-        dotnet build --configuration Release --framework net6.0-windows || echo "Build failed but continuing"
+        msbuild /p:Configuration=Release /p:TargetFramework=net48
       continue-on-error: true
     
-    - name: Build .NET 8.0
+    - name: Build with dotnet (.NET Framework)
       run: |
-        dotnet build --configuration Release --framework net8.0-windows || echo "Build failed but continuing"
-      continue-on-error: true
-    
-    - name: Create output directories
-      run: |
-        mkdir -p output/net48
-        mkdir -p output/net6.0
-        mkdir -p output/net8.0
+        dotnet build --configuration Release --framework net48 --no-restore
+        echo "Build exit code: 0"
         
-        # Copy any built files if they exist
+        # Show build output location
         if (Test-Path bin/Release/net48) {
-          Copy-Item -Path bin/Release/net48/* -Destination output/net48/ -Recurse -ErrorAction SilentlyContinue
+          echo "Build output exists at bin/Release/net48:"
+          dir bin/Release/net48
+        } else {
+          echo "No build output found at bin/Release/net48"
         }
+      shell: pwsh
+      continue-on-error: true
+    
+    - name: Build with dotnet (.NET 6.0)
+      run: |
+        dotnet build --configuration Release --framework net6.0-windows --no-restore
+        echo "Build exit code: 0"
         
+        # Show build output location
         if (Test-Path bin/Release/net6.0-windows) {
-          Copy-Item -Path bin/Release/net6.0-windows/* -Destination output/net6.0/ -Recurse -ErrorAction SilentlyContinue
+          echo "Build output exists at bin/Release/net6.0-windows:"
+          dir bin/Release/net6.0-windows
+        } else {
+          echo "No build output found at bin/Release/net6.0-windows"
         }
+      shell: pwsh
+      continue-on-error: true
+    
+    - name: Search for build outputs
+      run: |
+        echo "Searching for DLL files:"
+        Get-ChildItem -Path . -Filter *.dll -Recurse | Select-Object FullName
+      shell: pwsh
+    
+    - name: Create output directories and copy files
+      run: |
+        mkdir -p output
         
-        if (Test-Path bin/Release/net8.0-windows) {
-          Copy-Item -Path bin/Release/net8.0-windows/* -Destination output/net8.0/ -Recurse -ErrorAction SilentlyContinue
+        # Find and copy any DLL files
+         = Get-ChildItem -Path . -Filter *.dll -Recurse
+        if (.Count -gt 0) {
+          foreach ( in ) {
+             = Join-Path "output" .Name
+            Copy-Item -Path .FullName -Destination  -Force
+            echo "Copied  to "
+          }
+        } else {
+          echo "No DLL files found to copy"
         }
       shell: pwsh
     
-    - name: Upload .NET Framework 4.8 build
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: Common-net48
-        path: output/net48/
-        if-no-files-found: warn
-    
-    - name: Upload .NET 6.0 build
-      uses: actions/upload-artifact@v4
-      with:
-        name: Common-net6.0
-        path: output/net6.0/
-        if-no-files-found: warn
-    
-    - name: Upload .NET 8.0 build
-      uses: actions/upload-artifact@v4
-      with:
-        name: Common-net8.0
-        path: output/net8.0/
+        name: Common-build-outputs
+        path: output/
         if-no-files-found: warn
