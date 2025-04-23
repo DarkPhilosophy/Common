@@ -7,8 +7,8 @@
     <TrimMode>link</TrimMode>
   </PropertyGroup>
 
-  <!-- Enable nullable reference types only for .NET 6.0 and .NET 9.0 -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+  <!-- Enable nullable reference types only for .NET 6.0, .NET 8.0, and .NET 9.0 -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net8.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
@@ -23,7 +23,7 @@
     <DefineConstants>NET48;NETFRAMEWORK</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net8.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
     <LangVersion>latest</LangVersion>
     <DefineConstants>NET6_0_OR_GREATER</DefineConstants>
   </PropertyGroup>
@@ -33,9 +33,9 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
-  <!-- For .NET 6.0 and .NET 9.0, use Newtonsoft.Json as well for consistency -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  <!-- For .NET 6.0, .NET 8.0, and .NET 9.0, use System.Text.Json instead of Newtonsoft.Json -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0-windows' Or '$(TargetFramework)' == 'net8.0-windows' Or '$(TargetFramework)' == 'net9.0-windows'">
+    <!-- No need for Newtonsoft.Json as these frameworks have System.Text.Json built-in -->
   </ItemGroup>
 </Project>
 

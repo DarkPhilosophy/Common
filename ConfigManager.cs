@@ -1,8 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+
+#if NET48
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+#else
+using System.Text.Json;
+using System.Text.Json.Nodes;
+#endif
 
 namespace Common
 {
@@ -37,11 +43,19 @@ namespace Common
     /// </summary>
     public class ConfigManager
     {
+#if NET48
         private static readonly JsonSerializerSettings _serializerSettings = new JsonSerializerSettings
         {
             Formatting = Formatting.Indented,
             NullValueHandling = NullValueHandling.Ignore
         };
+#else
+        private static readonly JsonSerializerOptions _serializerOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
+#endif
 
         /// <summary>
         /// Gets or sets the storage location for configuration files
@@ -143,6 +157,7 @@ namespace Common
                 {
                     string json = File.ReadAllText(ConfigFilePath);
 
+#if NET48
                     // First, try to parse as a generic JSON object to check for missing properties
                     JObject jsonObj = JObject.Parse(json);
 
@@ -182,6 +197,47 @@ namespace Common
 
                     // Now deserialize the JSON (either original or updated) into our config type
                     var config = JsonConvert.DeserializeObject<T>(json, _serializerSettings);
+#else
+                    // First, try to parse as a generic JSON object to check for missing properties
+                    JsonNode jsonNode = JsonNode.Parse(json);
+
+                    // Get the properties of the default config
+                    var defaultProperties = GetProperties(defaultConfig);
+
+                    // Check if any properties are missing
+                    bool hasMissingProperties = false;
+                    foreach (var prop in defaultProperties)
+                    {
+                        if (jsonNode[prop.Key] == null)
+                        {
+                            hasMissingProperties = true;
+                            break;
+                        }
+                    }
+
+                    // If any properties are missing, we need to add them
+                    if (hasMissingProperties)
+                    {
+                        // Add missing properties
+                        foreach (var prop in defaultProperties)
+                        {
+                            if (jsonNode[prop.Key] == null)
+                            {
+                                jsonNode[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
+                                Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                            }
+                        }
+
+                        // Serialize back to JSON and save
+                        json = jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                        File.WriteAllText(ConfigFilePath, json);
+
+                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
+                    }
+
+                    // Now deserialize the JSON (either original or updated) into our config type
+                    var config = JsonSerializer.Deserialize<T>(json, _serializerOptions);
+#endif
 
                     if (config != null)
                     {
@@ -218,6 +274,7 @@ namespace Common
                         // Read the existing JSON file
                         string existingJson = File.ReadAllText(ConfigFilePath);
 
+#if NET48
                         // Parse the existing JSON
                         JObject existingConfig = JObject.Parse(existingJson);
 
@@ -241,10 +298,39 @@ namespace Common
                         // If there's an error parsing the existing JSON, fall back to full replacement
                         Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
                     }
+#else
+                        // Parse the existing JSON
+                        JsonNode existingConfig = JsonNode.Parse(existingJson);
+
+                        // Get the properties of the config to save
+                        var configProperties = GetProperties(config);
+
+                        // Update only the properties from this instance
+                        foreach (var prop in configProperties)
+                        {
+                            existingConfig[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
+                        }
+
+                        // Serialize back to JSON and save
+                        string updatedJson = existingConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                        File.WriteAllText(ConfigFilePath, updatedJson);
+                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
+                        return;
+                    }
+                    catch (JsonException)
+                    {
+                        // If there's an error parsing the existing JSON, fall back to full replacement
+                        Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                    }
+#endif
                 }
 
                 // If the file doesn't exist or there was an error parsing it, create a new one
+#if NET48
                 string json = JsonConvert.SerializeObject(config, _serializerSettings);
+#else
+                string json = JsonSerializer.Serialize(config, _serializerOptions);
+#endif
                 File.WriteAllText(ConfigFilePath, json);
                 Logger.Instance.LogInfo($"Created new {ConfigFileName} file", true);
             }
@@ -268,7 +354,11 @@ namespace Common
                 EnsureDirectoryExists();
 
                 // Save the default config
+#if NET48
                 string json = JsonConvert.SerializeObject(defaultConfig, _serializerSettings);
+#else
+                string json = JsonSerializer.Serialize(defaultConfig, _serializerOptions);
+#endif
                 File.WriteAllText(ConfigFilePath, json);
                 Logger.Instance.LogInfo($"Created default {ConfigFileName} file", true);
             }
