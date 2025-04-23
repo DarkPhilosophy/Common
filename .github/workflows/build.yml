@@ -34,61 +34,32 @@ jobs:
       run: |
         dir
         dir -Recurse -Depth 2
-        type Common.csproj
       shell: pwsh
-    
-    - name: Check for solution file
-      run: |
-        if (Test-Path *.sln) {
-          echo "Solution file found:"
-          dir *.sln
-        } else {
-          echo "No solution file found in root directory"
-        }
-      shell: pwsh
-    
-    - name: Restore dependencies with NuGet
-      run: |
-        nuget restore
-      continue-on-error: true
     
     - name: Restore dependencies with dotnet
       run: |
-        dotnet restore
-      continue-on-error: true
+        # Explicitly specify the project file for restore
+        dotnet restore Common.csproj
+      shell: pwsh
     
-    - name: Build with MSBuild (.NET Framework)
+    - name: Build with dotnet (.NET Framework 4.8)
       run: |
-        msbuild /p:Configuration=Release /p:TargetFramework=net48
-      continue-on-error: true
-    
-    - name: Build with dotnet (.NET Framework)
-      run: |
-        dotnet build --configuration Release --framework net48 --no-restore
+        dotnet build Common.csproj --configuration Release --framework net48
         echo "Build exit code: 0"
-        
-        # Show build output location
-        if (Test-Path bin/Release/net48) {
-          echo "Build output exists at bin/Release/net48:"
-          dir bin/Release/net48
-        } else {
-          echo "No build output found at bin/Release/net48"
-        }
       shell: pwsh
       continue-on-error: true
     
     - name: Build with dotnet (.NET 6.0)
       run: |
-        dotnet build --configuration Release --framework net6.0-windows --no-restore
+        dotnet build Common.csproj --configuration Release --framework net6.0-windows
         echo "Build exit code: 0"
-        
-        # Show build output location
-        if (Test-Path bin/Release/net6.0-windows) {
-          echo "Build output exists at bin/Release/net6.0-windows:"
-          dir bin/Release/net6.0-windows
-        } else {
-          echo "No build output found at bin/Release/net6.0-windows"
-        }
+      shell: pwsh
+      continue-on-error: true
+    
+    - name: Build with dotnet (.NET 8.0)
+      run: |
+        dotnet build Common.csproj --configuration Release --framework net8.0-windows
+        echo "Build exit code: 0"
       shell: pwsh
       continue-on-error: true
     
