@@ -18,6 +18,9 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
     
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
+    
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -36,59 +39,77 @@ jobs:
         dir -Recurse -Depth 2
       shell: pwsh
     
-    - name: Restore dependencies with dotnet
+    - name: Restore NuGet packages
       run: |
-        # Explicitly specify the project file for restore
-        dotnet restore Common.csproj
+        nuget restore Common.csproj
       shell: pwsh
     
-    - name: Build with dotnet (.NET Framework 4.8)
+    - name: Build with MSBuild (.NET Framework 4.8)
       run: |
-        dotnet build Common.csproj --configuration Release --framework net48
-        echo "Build exit code: $LASTEXITCODE"
+        msbuild Common.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:TargetFramework=net48
       shell: pwsh
       continue-on-error: true
     
-    - name: Build with dotnet (.NET 6.0)
+    - name: Build with MSBuild (.NET 6.0)
       run: |
-        dotnet build Common.csproj --configuration Release --framework net6.0-windows
-        echo "Build exit code: $LASTEXITCODE"
+        msbuild Common.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:TargetFramework=net6.0-windows
       shell: pwsh
       continue-on-error: true
     
-    - name: Build with dotnet (.NET 8.0)
+    - name: Build with MSBuild (.NET 8.0)
       run: |
-        dotnet build Common.csproj --configuration Release --framework net8.0-windows
-        echo "Build exit code: $LASTEXITCODE"
+        msbuild Common.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:TargetFramework=net8.0-windows
       shell: pwsh
       continue-on-error: true
     
     - name: Search for build outputs
       run: |
         echo "Searching for DLL files:"
-        Get-ChildItem -Path . -Filter *.dll -Recurse | Select-Object FullName
+        Get-ChildItem -Path . -Filter *.dll -Recurse | Where-Object { $_.FullName -notlike "*\\packages\\*" } | Select-Object FullName
       shell: pwsh
     
     - name: Create output directories and copy files
       run: |
-        mkdir -p output
+        mkdir -p output/net48
+        mkdir -p output/net6.0
+        mkdir -p output/net8.0
         
-        # Find and copy any DLL files
-        $dllFiles = Get-ChildItem -Path . -Filter *.dll -Recurse
-        if ($dllFiles.Count -gt 0) {
-          foreach ($file in $dllFiles) {
-            $destPath = Join-Path "output" $file.Name
-            Copy-Item -Path $file.FullName -Destination $destPath -Force
-            echo "Copied $($file.FullName) to $destPath"
-          }
-        } else {
-          echo "No DLL files found to copy"
+        # Copy .NET Framework 4.8 outputs
+        if (Test-Path bin/Release/net48) {
+          Copy-Item -Path bin/Release/net48/* -Destination output/net48/ -Recurse -Force
+          echo "Copied .NET Framework 4.8 outputs"
+        }
+        
+        # Copy .NET 6.0 outputs
+        if (Test-Path bin/Release/net6.0-windows) {
+          Copy-Item -Path bin/Release/net6.0-windows/* -Destination output/net6.0/ -Recurse -Force
+          echo "Copied .NET 6.0 outputs"
+        }
+        
+        # Copy .NET 8.0 outputs
+        if (Test-Path bin/Release/net8.0-windows) {
+          Copy-Item -Path bin/Release/net8.0-windows/* -Destination output/net8.0/ -Recurse -Force
+          echo "Copied .NET 8.0 outputs"
         }
       shell: pwsh
     
-    - name: Upload build artifacts
+    - name: Upload .NET Framework 4.8 build
       uses: actions/upload-artifact@v4
       with:
-        name: Common-build-outputs
-        path: output/
+        name: Common-net48
+        path: output/net48/
+        if-no-files-found: warn
+    
+    - name: Upload .NET 6.0 build
+      uses: actions/upload-artifact@v4
+      with:
+        name: Common-net6.0
+        path: output/net6.0/
+        if-no-files-found: warn
+    
+    - name: Upload .NET 8.0 build
+      uses: actions/upload-artifact@v4
+      with:
+        name: Common-net8.0
+        path: output/net8.0/
         if-no-files-found: warn
