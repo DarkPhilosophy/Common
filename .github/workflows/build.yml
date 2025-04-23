@@ -20,6 +20,7 @@ jobs:
       with:
         dotnet-version: |
           6.0.x
+          8.0.x
     
     - name: Install .NET Framework Developer Pack
       run: |
@@ -46,10 +47,16 @@ jobs:
         dotnet build --configuration Release --framework net6.0-windows || echo "Build failed but continuing"
       continue-on-error: true
     
+    - name: Build .NET 8.0
+      run: |
+        dotnet build --configuration Release --framework net8.0-windows || echo "Build failed but continuing"
+      continue-on-error: true
+    
     - name: Create output directories
       run: |
         mkdir -p output/net48
         mkdir -p output/net6.0
+        mkdir -p output/net8.0
         
         # Copy any built files if they exist
         if (Test-Path bin/Release/net48) {
@@ -58,6 +65,10 @@ jobs:
         
         if (Test-Path bin/Release/net6.0-windows) {
           Copy-Item -Path bin/Release/net6.0-windows/* -Destination output/net6.0/ -Recurse -ErrorAction SilentlyContinue
+        }
+        
+        if (Test-Path bin/Release/net8.0-windows) {
+          Copy-Item -Path bin/Release/net8.0-windows/* -Destination output/net8.0/ -Recurse -ErrorAction SilentlyContinue
         }
       shell: pwsh
     
@@ -73,4 +84,11 @@ jobs:
       with:
         name: Common-net6.0
         path: output/net6.0/
+        if-no-files-found: warn
+    
+    - name: Upload .NET 8.0 build
+      uses: actions/upload-artifact@v4
+      with:
+        name: Common-net8.0
+        path: output/net8.0/
         if-no-files-found: warn
