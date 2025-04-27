@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
 
 #if NET48
 using Newtonsoft.Json;
@@ -57,6 +60,9 @@ namespace Common
         };
 #endif
 
+        private static readonly object _fileLock = new object();
+        private static readonly Dictionary<Type, PropertyInfo[]> _propertyCache = new Dictionary<Type, PropertyInfo[]>();
+
         /// <summary>
         /// Gets or sets the storage location for configuration files
         /// </summary>
@@ -103,6 +109,8 @@ namespace Common
                         return Path.Combine(roamingAppData, CompanyName, ApplicationName, ConfigFileName);
 
                     case ConfigStorageLocation.CustomPath:
+                        if (string.IsNullOrEmpty(CustomPath))
+                            throw new InvalidOperationException("CustomPath must be set when StorageLocation is CustomPath.");
                         return Path.Combine(CustomPath, ConfigFileName);
 
                     default:
@@ -114,9 +122,7 @@ namespace Common
         /// <summary>
         /// Creates a new instance of the ConfigManager class
         /// </summary>
-        public ConfigManager()
-        {
-        }
+        public ConfigManager() { }
 
         /// <summary>
         /// Creates a new instance of the ConfigManager class with the specified storage location
@@ -134,10 +140,10 @@ namespace Common
             string customPath = "")
         {
             StorageLocation = storageLocation;
-            ConfigFileName = configFileName;
-            CompanyName = companyName;
-            ApplicationName = applicationName;
-            CustomPath = customPath;
+            ConfigFileName = configFileName ?? throw new ArgumentNullException(nameof(configFileName));
+            CompanyName = companyName ?? throw new ArgumentNullException(nameof(companyName));
+            ApplicationName = applicationName ?? throw new ArgumentNullException(nameof(applicationName));
+            CustomPath = customPath ?? string.Empty;
         }
 
         /// <summary>
@@ -148,100 +154,112 @@ namespace Common
         /// <returns>The loaded configuration settings</returns>
         public T Load<T>(T defaultConfig) where T : class, new()
         {
+            if (defaultConfig == null)
+                throw new ArgumentNullException(nameof(defaultConfig));
+
             try
             {
-                // Ensure the directory exists
                 EnsureDirectoryExists();
 
-                if (File.Exists(ConfigFilePath))
+                lock (_fileLock)
                 {
-                    string json = File.ReadAllText(ConfigFilePath);
-
+                    if (File.Exists(ConfigFilePath))
+                    {
+                        string json = ReadFileWithRetry(ConfigFilePath);
+                        try
+                        {
 #if NET48
-                    // First, try to parse as a generic JSON object to check for missing properties
-                    JObject jsonObj = JObject.Parse(json);
+                            // First, try to parse as a generic JSON object to check for missing properties
+                            JObject jsonObj = JObject.Parse(json);
 
-                    // Get the properties of the default config
-                    var defaultProperties = GetProperties(defaultConfig);
+                            // Get the properties of the default config
+                            var defaultProperties = GetProperties(defaultConfig);
 
-                    // Check if any properties are missing
-                    bool hasMissingProperties = false;
-                    foreach (var prop in defaultProperties)
-                    {
-                        if (jsonObj[prop.Key] == null)
-                        {
-                            hasMissingProperties = true;
-                            break;
-                        }
-                    }
-
-                    // If any properties are missing, we need to add them
-                    if (hasMissingProperties)
-                    {
-                        // Add missing properties
-                        foreach (var prop in defaultProperties)
-                        {
-                            if (jsonObj[prop.Key] == null)
+                            // Check if any properties are missing
+                            bool hasMissingProperties = false;
+                            foreach (var prop in defaultProperties)
                             {
-                                jsonObj[prop.Key] = JToken.FromObject(prop.Value);
-                                Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                if (jsonObj[prop.Key] == null)
+                                {
+                                    hasMissingProperties = true;
+                                    break;
+                                }
                             }
-                        }
 
-                        // Serialize back to JSON and save
-                        json = jsonObj.ToString(Formatting.Indented);
-                        File.WriteAllText(ConfigFilePath, json);
+                            // If any properties are missing, we need to add them
+                            if (hasMissingProperties)
+                            {
+                                // Add missing properties
+                                foreach (var prop in defaultProperties)
+                                {
+                                    if (jsonObj[prop.Key] == null)
+                                    {
+                                        jsonObj[prop.Key] = JToken.FromObject(prop.Value);
+                                        Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                    }
+                                }
 
-                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
-                    }
+                                // Serialize back to JSON and save
+                                json = jsonObj.ToString(Formatting.Indented);
+                                WriteFileWithRetry(ConfigFilePath, json);
+                                Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
+                            }
 
-                    // Now deserialize the JSON (either original or updated) into our config type
-                    var config = JsonConvert.DeserializeObject<T>(json, _serializerSettings);
+                            // Now deserialize the JSON (either original or updated) into our config type
+                            var config = JsonConvert.DeserializeObject<T>(json, _serializerSettings);
+                            if (config != null)
+                            {
+                                return config;
+                            }
 #else
-                    // First, try to parse as a generic JSON object to check for missing properties
-                    JsonNode jsonNode = JsonNode.Parse(json);
+                            // First, try to parse as a generic JSON object to check for missing properties
+                            JsonNode jsonNode = JsonNode.Parse(json);
 
-                    // Get the properties of the default config
-                    var defaultProperties = GetProperties(defaultConfig);
+                            // Get the properties of the default config
+                            var defaultProperties = GetProperties(defaultConfig);
 
-                    // Check if any properties are missing
-                    bool hasMissingProperties = false;
-                    foreach (var prop in defaultProperties)
-                    {
-                        if (jsonNode[prop.Key] == null)
-                        {
-                            hasMissingProperties = true;
-                            break;
-                        }
-                    }
-
-                    // If any properties are missing, we need to add them
-                    if (hasMissingProperties)
-                    {
-                        // Add missing properties
-                        foreach (var prop in defaultProperties)
-                        {
-                            if (jsonNode[prop.Key] == null)
+                            // Check if any properties are missing
+                            bool hasMissingProperties = false;
+                            foreach (var prop in defaultProperties)
                             {
-                                jsonNode[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
-                                Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                if (jsonNode[prop.Key] == null)
+                                {
+                                    hasMissingProperties = true;
+                                    break;
+                                }
                             }
-                        }
 
-                        // Serialize back to JSON and save
-                        json = jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-                        File.WriteAllText(ConfigFilePath, json);
+                            // If any properties are missing, we need to add them
+                            if (hasMissingProperties)
+                            {
+                                // Add missing properties
+                                foreach (var prop in defaultProperties)
+                                {
+                                    if (jsonNode[prop.Key] == null)
+                                    {
+                                        jsonNode[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
+                                        Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                    }
+                                }
 
-                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
-                    }
+                                // Serialize back to JSON and save
+                                json = jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                                WriteFileWithRetry(ConfigFilePath, json);
+                                Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
+                            }
 
-                    // Now deserialize the JSON (either original or updated) into our config type
-                    var config = JsonSerializer.Deserialize<T>(json, _serializerOptions);
+                            // Now deserialize the JSON (either original or updated) into our config type
+                            var config = JsonSerializer.Deserialize<T>(json, _serializerOptions);
+                            if (config != null)
+                            {
+                                return config;
+                            }
 #endif
-
-                    if (config != null)
-                    {
-                        return config;
+                        }
+                        catch (JsonException ex)
+                        {
+                            Logger.Instance.LogError($"Error parsing {ConfigFilePath}: {ex.Message}", true);
+                        }
                     }
                 }
             }
@@ -261,81 +279,85 @@ namespace Common
         /// <param name="config">The configuration settings to save</param>
         public void Save<T>(T config) where T : class, new()
         {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+
             try
             {
-                // Ensure the directory exists
                 EnsureDirectoryExists();
 
-                // Check if the config file exists
-                if (File.Exists(ConfigFilePath))
+                lock (_fileLock)
                 {
-                    try
+                    // Check if the config file exists
+                    if (File.Exists(ConfigFilePath))
                     {
-                        // Read the existing JSON file
-                        string existingJson = File.ReadAllText(ConfigFilePath);
+                        try
+                        {
+                            // Read the existing JSON file
+                            string existingJson = ReadFileWithRetry(ConfigFilePath);
 
 #if NET48
-                        // Parse the existing JSON
-                        JObject existingConfig = JObject.Parse(existingJson);
+                            // Parse the existing JSON
+                            JObject existingConfig = JObject.Parse(existingJson);
 
-                        // Get the properties of the config to save
-                        var configProperties = GetProperties(config);
+                            // Get the properties of the config to save
+                            var configProperties = GetProperties(config);
 
-                        // Update only the properties from this instance
-                        foreach (var prop in configProperties)
-                        {
-                            existingConfig[prop.Key] = JToken.FromObject(prop.Value);
-                        }
+                            // Update only the properties from this instance
+                            foreach (var prop in configProperties)
+                            {
+                                existingConfig[prop.Key] = JToken.FromObject(prop.Value);
+                            }
 
-                        // Serialize back to JSON and save
-                        string updatedJson = existingConfig.ToString(Formatting.Indented);
-                        File.WriteAllText(ConfigFilePath, updatedJson);
-                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
-                        return;
-                    }
-                    catch (Newtonsoft.Json.JsonException)
-                    {
-                        // If there's an error parsing the existing JSON, fall back to full replacement
-                        Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
-                    }
-                }
+                            // Serialize back to JSON and save
+                            string updatedJson = existingConfig.ToString(Formatting.Indented);
+                            WriteFileWithRetry(ConfigFilePath, updatedJson);
+                            Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
+                            return;
 #else
-                try
-                {
-                        // Parse the existing JSON
-                        JsonNode existingConfig = JsonNode.Parse(existingJson);
+                            // Parse the existing JSON
+                            JsonNode existingConfig = JsonNode.Parse(existingJson);
 
-                        // Get the properties of the config to save
-                        var configProperties = GetProperties(config);
+                            // Get the properties of the config to save
+                            var configProperties = GetProperties(config);
 
-                        // Update only the properties from this instance
-                        foreach (var prop in configProperties)
-                        {
-                            existingConfig[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
-                        }
+                            // Update only the properties from this instance
+                            foreach (var prop in configProperties)
+                            {
+                                existingConfig[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
+                            }
 
-                        // Serialize back to JSON and save
-                        string updatedJson = existingConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-                        File.WriteAllText(ConfigFilePath, updatedJson);
-                        Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
-                        return;
-                    }
-                    catch (JsonException)
-                    {
-                        // If there's an error parsing the existing JSON, fall back to full replacement
-                        Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
-                    }
+                            // Serialize back to JSON and save
+                            string updatedJson = existingConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                            WriteFileWithRetry(ConfigFilePath, updatedJson);
+                            Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
+                            return;
 #endif
-                }
-
-                // If the file doesn't exist or there was an error parsing it, create a new one
+                        }
 #if NET48
-                string json = JsonConvert.SerializeObject(config, _serializerSettings);
+                        catch (JsonException)
+                        {
+                            // If there's an error parsing the existing JSON, fall back to full replacement
+                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                        }
 #else
-                string json = JsonSerializer.Serialize(config, _serializerOptions);
+                        catch (JsonException)
+                        {
+                            // If there's an error parsing the existing JSON, fall back to full replacement
+                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                        }
 #endif
-                File.WriteAllText(ConfigFilePath, json);
-                Logger.Instance.LogInfo($"Created new {ConfigFileName} file", true);
+                    }
+
+                    // If the file doesn't exist or there was an error parsing it, create a new one
+#if NET48
+                    string json = JsonConvert.SerializeObject(config, _serializerSettings);
+#else
+                    string json = JsonSerializer.Serialize(config, _serializerOptions);
+#endif
+                    WriteFileWithRetry(ConfigFilePath, json);
+                    Logger.Instance.LogInfo($"Created new {ConfigFileName} file", true);
+                }
             }
             catch (Exception ex)
             {
@@ -353,17 +375,18 @@ namespace Common
         {
             try
             {
-                // Ensure the directory exists
                 EnsureDirectoryExists();
 
-                // Save the default config
+                lock (_fileLock)
+                {
 #if NET48
-                string json = JsonConvert.SerializeObject(defaultConfig, _serializerSettings);
+                    string json = JsonConvert.SerializeObject(defaultConfig, _serializerSettings);
 #else
-                string json = JsonSerializer.Serialize(defaultConfig, _serializerOptions);
+                    string json = JsonSerializer.Serialize(defaultConfig, _serializerOptions);
 #endif
-                File.WriteAllText(ConfigFilePath, json);
-                Logger.Instance.LogInfo($"Created default {ConfigFileName} file", true);
+                    WriteFileWithRetry(ConfigFilePath, json);
+                    Logger.Instance.LogInfo($"Created default {ConfigFileName} file", true);
+                }
             }
             catch (Exception ex)
             {
@@ -384,7 +407,15 @@ namespace Common
             var properties = new Dictionary<string, object>();
             var type = obj.GetType();
 
-            foreach (var prop in type.GetProperties())
+            if (!_propertyCache.TryGetValue(type, out var props))
+            {
+                props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                            .Where(p => p.CanRead)
+                            .ToArray();
+                _propertyCache[type] = props;
+            }
+
+            foreach (var prop in props)
             {
                 if (prop.CanRead)
                 {
@@ -414,7 +445,54 @@ namespace Common
                 Directory.CreateDirectory(directory);
             }
         }
+
+        /// <summary>
+        /// Reads a file with retry logic
+        /// </summary>
+        /// <param name="path">The path to the file</param>
+        /// <param name="maxRetries">The maximum number of retries</param>
+        /// <param name="delayMs">The delay between retries in milliseconds</param>
+        /// <returns>The contents of the file</returns>
+        private string ReadFileWithRetry(string path, int maxRetries = 3, int delayMs = 100)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    return File.ReadAllText(path);
+                }
+                catch (IOException ex) when (i < maxRetries - 1)
+                {
+                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} reading {path}: {ex.Message}", true);
+                    Thread.Sleep(delayMs);
+                }
+            }
+            return File.ReadAllText(path); // Final attempt, let it throw if it fails
+        }
+
+        /// <summary>
+        /// Writes a file with retry logic
+        /// </summary>
+        /// <param name="path">The path to the file</param>
+        /// <param name="content">The content to write</param>
+        /// <param name="maxRetries">The maximum number of retries</param>
+        /// <param name="delayMs">The delay between retries in milliseconds</param>
+        private void WriteFileWithRetry(string path, string content, int maxRetries = 3, int delayMs = 100)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    File.WriteAllText(path, content);
+                    return;
+                }
+                catch (IOException ex) when (i < maxRetries - 1)
+                {
+                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} writing {path}: {ex.Message}", true);
+                    Thread.Sleep(delayMs);
+                }
+            }
+            File.WriteAllText(path, content); // Final attempt, let it throw if it fails
+        }
     }
 }
-
-
