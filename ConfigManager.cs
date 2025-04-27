@@ -293,7 +293,15 @@ namespace Common
                         Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
                         return;
                     }
-                    catch (Newtonsoft.Json.JsonException)\r\n                    {\r\n                        // If there's an error parsing the existing JSON, fall back to full replacement\r\n                        Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);\r\n                    }\r\n                }\r\n#else\r\n                try\r\n                {
+                    catch (Newtonsoft.Json.JsonException)
+                    {
+                        // If there's an error parsing the existing JSON, fall back to full replacement
+                        Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                    }
+                }
+#else
+                try
+                {
                         // Parse the existing JSON
                         JsonNode existingConfig = JsonNode.Parse(existingJson);
 
@@ -408,4 +416,5 @@ namespace Common
         }
     }
 }
+
 
