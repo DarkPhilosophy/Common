@@ -61,14 +61,14 @@ jobs:
         nuget install Fody -Version 6.6.4
       shell: pwsh
 
-    - name: Restore dependencies with dotnet
+    - name: Restore dependencies with dotnet (only for .NET Framework 4.8)
       run: |
-        dotnet restore Common.csproj
+        dotnet restore Common.csproj /p:TargetFrameworks=net48
       shell: pwsh
 
     - name: Build with dotnet (.NET Framework 4.8 only)
       run: |
-        dotnet build Common.csproj --configuration Release --framework net48
+        dotnet build Common.csproj --configuration Release --framework net48 /p:TargetFrameworks=net48
         echo "Build exit code: $LASTEXITCODE"
       shell: pwsh
 
