@@ -8,7 +8,7 @@ Această bibliotecă conține componente standardizate care pot fi partajate în
 
 ### Versiune curentă
 
-**1.0.1.0** - [Vezi jurnalul de modificări](CHANGELOG.md)
+**1.0.2.0** - [Vezi jurnalul de modificări](CHANGELOG.md)
 
 ### Componente
 
@@ -340,7 +340,7 @@ This library contains standardized components that can be shared between the Con
 
 ### Current Version
 
-**1.0.1.0** - [See changelog](CHANGELOG.md)
+**1.0.2.0** - [See changelog](CHANGELOG.md)
 
 ### Components
 
