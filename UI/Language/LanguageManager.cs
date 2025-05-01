@@ -1,7 +1,8 @@
 using System;
 using System.Windows;
+using Common.Logging;
 
-namespace Common
+namespace Common.UI.Language
 {
     /// <summary>
     /// Provides language management functionality for applications.
@@ -25,6 +26,9 @@ namespace Common
 
         // Application name for resource paths
         private string _applicationName;
+
+        // Custom language path
+        private string _languagePath = "assets/Languages";
 
         /// <summary>
         /// Gets the singleton instance of the LanguageManager.
@@ -60,7 +64,8 @@ namespace Common
         /// Initializes the LanguageManager with a specific application name.
         /// </summary>
         /// <param name="applicationName">The name of the application for resource paths.</param>
-        public void Initialize(string applicationName)
+        /// <param name="languagePath">Optional custom path for language files (default: "assets/Languages").</param>
+        public void Initialize(string applicationName, string languagePath = "assets/Languages")
         {
             // Remove current language resource if it exists
             if (_currentLanguageResource != null)
@@ -68,13 +73,14 @@ namespace Common
                 Application.Current.Resources.MergedDictionaries.Remove(_currentLanguageResource);
             }
 
-            // Set the application name
+            // Set the application name and language path
             _applicationName = applicationName;
+            _languagePath = languagePath;
 
             // Initialize with default language (English)
             _currentLanguageResource = new ResourceDictionary
             {
-                Source = new Uri($"/{_applicationName};component/assets/Languages/English.xaml", UriKind.Relative)
+                Source = new Uri($"/{_applicationName};component/{_languagePath}/English.xaml", UriKind.Relative)
             };
 
             // Add to application resources
@@ -85,10 +91,14 @@ namespace Common
         /// Switches the application language.
         /// </summary>
         /// <param name="language">The language to switch to (e.g., "English", "Romanian").</param>
-        public void SwitchLanguage(string language)
+        /// <param name="customPath">Optional custom path for this specific language switch.</param>
+        public void SwitchLanguage(string language, string customPath = null)
         {
             try
             {
+                // Use the provided custom path or fall back to the default
+                string path = customPath ?? _languagePath;
+
                 // Remove current language resource
                 if (_currentLanguageResource != null)
                 {
@@ -98,7 +108,7 @@ namespace Common
                 // Load new language resource
                 _currentLanguageResource = new ResourceDictionary
                 {
-                    Source = new Uri($"/{_applicationName};component/assets/Languages/{language}.xaml", UriKind.Relative)
+                    Source = new Uri($"/{_applicationName};component/{path}/{language}.xaml", UriKind.Relative)
                 };
 
                 // Add to application resources
@@ -113,7 +123,7 @@ namespace Common
                 {
                     _currentLanguageResource = new ResourceDictionary
                     {
-                        Source = new Uri($"/{_applicationName};component/assets/Languages/English.xaml", UriKind.Relative)
+                        Source = new Uri($"/{_applicationName};component/{_languagePath}/English.xaml", UriKind.Relative)
                     };
                     Application.Current.Resources.MergedDictionaries.Add(_currentLanguageResource);
                 }
@@ -139,12 +149,13 @@ namespace Common
         /// Loads the language from the application configuration.
         /// </summary>
         /// <param name="language">The language to load from config.</param>
-        public void LoadLanguageFromConfig(string language = "English")
+        /// <param name="customPath">Optional custom path for this specific language switch.</param>
+        public void LoadLanguageFromConfig(string language = "English", string customPath = null)
         {
             try
             {
                 // Switch to the specified language
-                SwitchLanguage(language);
+                SwitchLanguage(language, customPath);
                 Logger.Instance.LogInfo($"Loaded language: {language}", true); // Set to console-only to avoid duplicate messages
             }
             catch (Exception ex)
@@ -153,7 +164,7 @@ namespace Common
                 try
                 {
                     // Fall back to English
-                    SwitchLanguage("English");
+                    SwitchLanguage("English", customPath);
                 }
                 catch
                 {

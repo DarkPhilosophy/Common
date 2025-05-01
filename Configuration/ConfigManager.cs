@@ -3,17 +3,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security;
 using System.Threading;
+using Common.Logging;
 
 #if NET48
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 #else
 using System.Text.Json;
-using System.Text.Json.Nodes;
 #endif
 
-namespace Common
+namespace Common.Configuration
 {
     /// <summary>
     /// Defines the storage location for configuration files
@@ -165,7 +166,9 @@ namespace Common
                 {
                     if (File.Exists(ConfigFilePath))
                     {
+                        Logger.Instance.LogInfo($"Loading configuration from {ConfigFilePath}", true);
                         string json = ReadFileWithRetry(ConfigFilePath);
+                        Logger.Instance.LogInfo($"Configuration file content: {json}", true);
                         try
                         {
 #if NET48
@@ -209,63 +212,105 @@ namespace Common
                             var config = JsonConvert.DeserializeObject<T>(json, _serializerSettings);
                             if (config != null)
                             {
+                                // Log the deserialized config
+                                Logger.Instance.LogInfo($"Deserialized config from {ConfigFilePath}", true);
+
+                                // Return the deserialized config
                                 return config;
                             }
 #else
                             // First, try to parse as a generic JSON object to check for missing properties
-                            JsonNode jsonNode = JsonNode.Parse(json);
-
-                            // Get the properties of the default config
-                            var defaultProperties = GetProperties(defaultConfig);
-
-                            // Check if any properties are missing
-                            bool hasMissingProperties = false;
-                            foreach (var prop in defaultProperties)
+                            using (JsonDocument jsonDoc = JsonDocument.Parse(json))
                             {
-                                if (jsonNode[prop.Key] == null)
-                                {
-                                    hasMissingProperties = true;
-                                    break;
-                                }
-                            }
+                                // Get the properties of the default config
+                                var defaultProperties = GetProperties(defaultConfig);
 
-                            // If any properties are missing, we need to add them
-                            if (hasMissingProperties)
-                            {
-                                // Add missing properties
+                                // Check if any properties are missing
+                                bool hasMissingProperties = false;
                                 foreach (var prop in defaultProperties)
                                 {
-                                    if (jsonNode[prop.Key] == null)
+                                    if (!jsonDoc.RootElement.TryGetProperty(prop.Key, out _))
                                     {
-                                        jsonNode[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
-                                        Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                        hasMissingProperties = true;
+                                        break;
                                     }
                                 }
 
-                                // Serialize back to JSON and save
-                                json = jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-                                WriteFileWithRetry(ConfigFilePath, json);
-                                Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
+                                // If any properties are missing, we need to add them
+                                if (hasMissingProperties)
+                                {
+                                    // Create a new dictionary from the existing JSON
+                                    var jsonDict = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                                    if (jsonDict == null)
+                                    {
+                                        jsonDict = new Dictionary<string, object>();
+                                    }
+
+                                    // Add missing properties
+                                    foreach (var prop in defaultProperties)
+                                    {
+                                        if (!jsonDict.ContainsKey(prop.Key))
+                                        {
+                                            jsonDict[prop.Key] = prop.Value;
+                                            Logger.Instance.LogInfo($"Added missing {prop.Key} property to {ConfigFileName}", true);
+                                        }
+                                    }
+
+                                    // Serialize back to JSON and save
+                                    json = JsonSerializer.Serialize(jsonDict, new JsonSerializerOptions { WriteIndented = true });
+                                    WriteFileWithRetry(ConfigFilePath, json);
+                                    Logger.Instance.LogInfo($"Updated {ConfigFileName} with missing properties", true);
+                                }
                             }
 
                             // Now deserialize the JSON (either original or updated) into our config type
                             var config = JsonSerializer.Deserialize<T>(json, _serializerOptions);
                             if (config != null)
                             {
+                                // Log the deserialized config
+                                Logger.Instance.LogInfo($"Deserialized config from {ConfigFilePath}", true);
+
+                                // Return the deserialized config
                                 return config;
                             }
 #endif
                         }
                         catch (JsonException ex)
                         {
-                            Logger.Instance.LogError($"Error parsing {ConfigFilePath}: {ex.Message}", true);
+                            var data = new Dictionary<string, object>
+                            {
+                                { "FilePath", ConfigFilePath },
+                                { "ExceptionType", ex.GetType().Name }
+                            };
+                            Logger.Instance.LogError($"Error parsing {ConfigFilePath}: {ex.Message}", true, "CFG-002", data);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Logger.Instance.LogError($"Error loading config from {ConfigFilePath}: {ex.Message}", true);
+                string errorCode = "CFG-001"; // Default to file not found
+
+                if (ex is UnauthorizedAccessException || ex is SecurityException)
+                {
+                    errorCode = "CFG-003"; // Access denied
+                }
+                else if (ex is DirectoryNotFoundException)
+                {
+                    errorCode = "CFG-004"; // Directory creation failed
+                }
+                else if (ex is IOException)
+                {
+                    errorCode = "CFG-005"; // File read error
+                }
+
+                var data = new Dictionary<string, object>
+                {
+                    { "FilePath", ConfigFilePath },
+                    { "ExceptionType", ex.GetType().Name }
+                };
+
+                Logger.Instance.LogException(ex, $"Error loading config from {ConfigFilePath}", errorCode, true);
             }
 
             // Return default config if loading fails
@@ -315,8 +360,12 @@ namespace Common
                             Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
                             return;
 #else
-                            // Parse the existing JSON
-                            JsonNode existingConfig = JsonNode.Parse(existingJson);
+                            // Parse the existing JSON into a dictionary
+                            var existingConfig = JsonSerializer.Deserialize<Dictionary<string, object>>(existingJson);
+                            if (existingConfig == null)
+                            {
+                                existingConfig = new Dictionary<string, object>();
+                            }
 
                             // Get the properties of the config to save
                             var configProperties = GetProperties(config);
@@ -324,27 +373,39 @@ namespace Common
                             // Update only the properties from this instance
                             foreach (var prop in configProperties)
                             {
-                                existingConfig[prop.Key] = JsonSerializer.SerializeToNode(prop.Value);
+                                existingConfig[prop.Key] = prop.Value;
                             }
 
                             // Serialize back to JSON and save
-                            string updatedJson = existingConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                            string updatedJson = JsonSerializer.Serialize(existingConfig, new JsonSerializerOptions { WriteIndented = true });
                             WriteFileWithRetry(ConfigFilePath, updatedJson);
                             Logger.Instance.LogInfo($"Updated {ConfigFileName} with new values", true);
                             return;
 #endif
                         }
 #if NET48
-                        catch (JsonException)
+                        catch (JsonException ex)
                         {
                             // If there's an error parsing the existing JSON, fall back to full replacement
-                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                            var data = new Dictionary<string, object>
+                            {
+                                { "FilePath", ConfigFilePath },
+                                { "ExceptionType", ex.GetType().Name },
+                                { "Action", "Creating new file" }
+                            };
+                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true, data);
                         }
 #else
-                        catch (JsonException)
+                        catch (JsonException ex)
                         {
                             // If there's an error parsing the existing JSON, fall back to full replacement
-                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true);
+                            var data = new Dictionary<string, object>
+                            {
+                                { "FilePath", ConfigFilePath },
+                                { "ExceptionType", ex.GetType().Name },
+                                { "Action", "Creating new file" }
+                            };
+                            Logger.Instance.LogWarning($"Error parsing existing {ConfigFileName}, creating new file", true, data);
                         }
 #endif
                     }
@@ -361,7 +422,18 @@ namespace Common
             }
             catch (Exception ex)
             {
-                Logger.Instance.LogError($"Error saving config to {ConfigFilePath}: {ex.Message}", true);
+                string errorCode = "CFG-006"; // Default to file write error
+
+                if (ex is UnauthorizedAccessException || ex is SecurityException)
+                {
+                    errorCode = "CFG-003"; // Access denied
+                }
+                else if (ex is DirectoryNotFoundException)
+                {
+                    errorCode = "CFG-004"; // Directory creation failed
+                }
+
+                Logger.Instance.LogException(ex, $"Error saving config to {ConfigFilePath}", errorCode, true);
             }
         }
 
@@ -390,7 +462,18 @@ namespace Common
             }
             catch (Exception ex)
             {
-                Logger.Instance.LogError($"Error creating default config: {ex.Message}", true);
+                string errorCode = "CFG-006"; // Default to file write error
+
+                if (ex is UnauthorizedAccessException || ex is SecurityException)
+                {
+                    errorCode = "CFG-003"; // Access denied
+                }
+                else if (ex is DirectoryNotFoundException)
+                {
+                    errorCode = "CFG-004"; // Directory creation failed
+                }
+
+                Logger.Instance.LogException(ex, "Error creating default config", errorCode, true);
             }
 
             return defaultConfig;
@@ -420,10 +503,8 @@ namespace Common
                 if (prop.CanRead)
                 {
                     var value = prop.GetValue(obj);
-                    if (value != null)
-                    {
-                        properties[prop.Name] = value;
-                    }
+                    // Include all properties, even if they're null
+                    properties[prop.Name] = value ?? GetDefaultValue(prop.PropertyType);
                 }
             }
 
@@ -431,18 +512,120 @@ namespace Common
         }
 
         /// <summary>
+        /// Gets the default value for a type
+        /// </summary>
+        /// <param name="type">The type to get the default value for</param>
+        /// <returns>The default value for the type</returns>
+        private object GetDefaultValue(Type type)
+        {
+            try
+            {
+#if NET6_0_OR_GREATER
+                // Create an instance of the type
+                object? instance = Activator.CreateInstance(type);
+
+                // Return the instance if it's not null
+                if (instance != null)
+                {
+                    return instance;
+                }
+
+                // If instance is null, create a new object based on type
+                if (type.IsValueType)
+                {
+                    // For value types, create a new instance
+                    return Activator.CreateInstance(type);
+                }
+                else if (type == typeof(string))
+                {
+                    // For strings, return an empty string
+                    return string.Empty;
+                }
+                else
+                {
+                    // For other reference types, create a new object
+                    return new object();
+                }
+#else
+                if (type.IsValueType)
+                {
+                    return Activator.CreateInstance(type);
+                }
+
+                // For reference types, try to create an instance
+                object instance = Activator.CreateInstance(type);
+                if (instance != null)
+                {
+                    return instance;
+                }
+
+                // If instance is null, return appropriate default values
+                if (type == typeof(string))
+                {
+                    return string.Empty;
+                }
+                else
+                {
+                    return new object();
+                }
+#endif
+            }
+            catch
+            {
+                // Handle exceptions by returning appropriate default values
+                if (type.IsValueType)
+                {
+                    // For value types, create a new instance
+                    return Activator.CreateInstance(type);
+                }
+                else if (type == typeof(string))
+                {
+                    // For strings, return an empty string
+                    return string.Empty;
+                }
+                else
+                {
+                    // For other reference types, create a new object
+                    return new object();
+                }
+            }
+        }
+
+        /// <summary>
         /// Ensures that the directory for the configuration file exists
         /// </summary>
         private void EnsureDirectoryExists()
         {
-#if NET6_0_OR_GREATER
-            string? directory = Path.GetDirectoryName(ConfigFilePath);
-#else
-            string directory = Path.GetDirectoryName(ConfigFilePath);
-#endif
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            try
             {
-                Directory.CreateDirectory(directory);
+#if NET6_0_OR_GREATER
+                string? directory = Path.GetDirectoryName(ConfigFilePath);
+#else
+                string directory = Path.GetDirectoryName(ConfigFilePath);
+#endif
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                    Logger.Instance.LogInfo($"Created directory: {directory}", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                string errorCode = "CFG-004"; // Directory creation failed
+
+                if (ex is UnauthorizedAccessException || ex is SecurityException)
+                {
+                    errorCode = "CFG-003"; // Access denied
+                }
+
+                var data = new Dictionary<string, object>
+                {
+                    { "FilePath", ConfigFilePath },
+                    { "ExceptionType", ex.GetType().Name }
+                };
+
+                Logger.Instance.LogException(ex, "Failed to create directory for configuration file", errorCode, true);
+                throw; // Rethrow to be handled by the calling method
             }
         }
 
@@ -463,7 +646,14 @@ namespace Common
                 }
                 catch (IOException ex) when (i < maxRetries - 1)
                 {
-                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} reading {path}: {ex.Message}", true);
+                    var data = new Dictionary<string, object>
+                    {
+                        { "FilePath", path },
+                        { "RetryCount", i + 1 },
+                        { "MaxRetries", maxRetries },
+                        { "ExceptionType", ex.GetType().Name }
+                    };
+                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} reading {path}: {ex.Message}", true, data);
                     Thread.Sleep(delayMs);
                 }
             }
@@ -488,7 +678,14 @@ namespace Common
                 }
                 catch (IOException ex) when (i < maxRetries - 1)
                 {
-                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} writing {path}: {ex.Message}", true);
+                    var data = new Dictionary<string, object>
+                    {
+                        { "FilePath", path },
+                        { "RetryCount", i + 1 },
+                        { "MaxRetries", maxRetries },
+                        { "ExceptionType", ex.GetType().Name }
+                    };
+                    Logger.Instance.LogWarning($"Retry {i + 1}/{maxRetries} writing {path}: {ex.Message}", true, data);
                     Thread.Sleep(delayMs);
                 }
             }

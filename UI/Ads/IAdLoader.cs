@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace Common
+namespace Common.UI.Ads
 {
     /// <summary>
     /// Interface for ad loaders that can load ads from various sources
