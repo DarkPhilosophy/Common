@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net48;net5.0-windows;net6.0-windows;net7.0-windows;net8.0-windows;net9.0-windows;net10.0-windows</TargetFrameworks>
+    <TargetFrameworks>net48;net5.0-windows;net6.0-windows;net7.0-windows;net8.0-windows;net9.0-windows;net9.0-windows</TargetFrameworks>
     <ImplicitUsings>disable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <PublishTrimmed>false</PublishTrimmed>
@@ -11,35 +11,29 @@
     <Product>Common</Product>
     <Description>Common library for FlexTools applications</Description>
     <Copyright>© 2025 MIT License</Copyright>
+    <NoWarn>NU1903</NoWarn>
   </PropertyGroup>
 
-  <!-- Enable nullable reference types for all frameworks except .NET Framework 4.8 -->
+    <!-- Framework-specific constants -->
   <PropertyGroup Condition="'$(TargetFramework)' != 'net48'">
-    <Nullable>enable</Nullable>
+    <DefineConstants>NETCOREAPP</DefineConstants>
   </PropertyGroup>
 
-  <!-- Disable nullable reference types for .NET Framework 4.8 -->
+  <!-- Properties for .NET Framework 4.8 -->
   <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
     <Nullable>disable</Nullable>
-  </PropertyGroup>
-
-  <!-- Framework-specific properties -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
     <LangVersion>7.3</LangVersion>
-    <DefineConstants>NET48;NETFRAMEWORK</DefineConstants>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(TargetFramework)' != 'net48' And '$(TargetFramework)' != 'net5.0-windows'">
-    <LangVersion>latest</LangVersion>
-    <DefineConstants>NET6_0_OR_GREATER</DefineConstants>
+    <DefineConstants>NET48</DefineConstants>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
 
   <!-- Framework-specific package references -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.4" />
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <PackageReference Include="System.Text.Json" Version="6.0.0" />
+    <PackageReference Include="System.Text.Json" Version="9.0.4" />
     <PackageReference Include="Costura.Fody" Version="5.7.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -57,5 +51,6 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
   </ItemGroup>
 </Project>
+
 
 
