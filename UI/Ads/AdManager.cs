@@ -46,10 +46,10 @@ namespace Common.UI.Ads
         private List<double> _messageWidths = new List<double>();
         private int _currentAdIndex = 0;
         private int _bannerWidth = 0;
-#if NET6_0_OR_GREATER
-        private Action<string, bool, bool, bool, bool, bool>? _logCallback;
+#if NET48
+        private Action<string, bool, bool, bool, bool, bool, Dictionary<string, object>> _logCallback;
 #else
-        private Action<string, bool, bool, bool, bool, bool> _logCallback;
+        private Action<string, bool, bool, bool, bool, bool, Dictionary<string, object>>? _logCallback;
 #endif
         private string _currentLanguage = "English";
         private Dictionary<string, List<string>> _languageMessages = new Dictionary<string, List<string>>();
@@ -126,10 +126,10 @@ namespace Common.UI.Ads
             Log("Cleanup complete", true);
         }
 
-#if NET6_0_OR_GREATER
-        public void Initialize(TextBlock adBanner, Grid? adContainer = null, Action<string, bool, bool, bool, bool, bool>? logCallback = null, IAdLoader? adLoader = null)
+#if NET48
+        public void Initialize(TextBlock adBanner, Grid adContainer = null, Action<string, bool, bool, bool, bool, bool, Dictionary<string, object>> logCallback = null, IAdLoader adLoader = null)
 #else
-        public void Initialize(TextBlock adBanner, Grid adContainer = null, Action<string, bool, bool, bool, bool, bool> logCallback = null, IAdLoader adLoader = null)
+        public void Initialize(TextBlock adBanner, Grid? adContainer = null, Action<string, bool, bool, bool, bool, bool, Dictionary<string, object>>? logCallback = null, IAdLoader? adLoader = null)
 #endif
         {
             _adBanner = adBanner;
@@ -199,7 +199,8 @@ namespace Common.UI.Ads
                 double containerWidth = _adContainer?.ActualWidth ?? (_adBanner.Parent as FrameworkElement)?.ActualWidth ?? 500;
                 double actualBannerWidth = e.NewSize.Width;
                 _bannerWidth = (int)containerWidth;
-                Log($"Banner resized: containerWidth={containerWidth}px, actualBannerWidth={actualBannerWidth}px, bannerWidth={_bannerWidth}px, parentType={_adBanner.Parent?.GetType().Name}", true);
+                // Comment out verbose text banner logs
+                // Log($"Banner resized: containerWidth={containerWidth}px, actualBannerWidth={actualBannerWidth}px, bannerWidth={_bannerWidth}px, parentType={_adBanner.Parent?.GetType().Name}", true, "Text");
                 if (_parsedAdMessages.Count > 0)
                     ParseColorMarkdown();
             };
@@ -224,10 +225,24 @@ namespace Common.UI.Ads
             }
         }
 
-        private void Log(string message, bool consoleOnly)
+        private void Log(string message, bool consoleOnly, string type = "General")
         {
             if (_logCallback != null)
             {
+                string prefix = "";
+                switch (type)
+                {
+                    case "Text":
+                        prefix = "AdManager Text: ";
+                        break;
+                    case "Image":
+                        prefix = "AdManager Image: ";
+                        break;
+                    default:
+                        prefix = "AdManager General: ";
+                        break;
+                }
+
                 if (Application.Current != null &&
                     Application.Current.Dispatcher != null &&
                     !Application.Current.Dispatcher.CheckAccess())
@@ -235,13 +250,13 @@ namespace Common.UI.Ads
                     // We're not on the UI thread, so dispatch to the UI thread
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        _logCallback($"AdManager: {message}", false, false, false, true, consoleOnly);
+                        _logCallback($"{prefix}{message}", false, false, false, true, consoleOnly, new Dictionary<string, object>());
                     });
                 }
                 else
                 {
                     // We're already on the UI thread, so call directly
-                    _logCallback($"AdManager: {message}", false, false, false, true, consoleOnly);
+                    _logCallback($"{prefix}{message}", false, false, false, true, consoleOnly, new Dictionary<string, object>());
                 }
             }
         }
@@ -479,7 +494,7 @@ namespace Common.UI.Ads
 
                 _parsedAdMessages.Add(parsed);
                 _messageWidths.Add(totalWidth);
-                Log($"Parsed message: width={totalWidth}px, text={plainText}", true);
+                // Log($"Parsed message: width={totalWidth}px, text={plainText}", true, "Text");
             }
         }
 
@@ -531,10 +546,10 @@ namespace Common.UI.Ads
             Log("Animation stopped", true);
         }
 
-#if NET6_0_OR_GREATER
-        private void Timer_Tick(object? sender, EventArgs e)
-#else
+#if NET48
         private void Timer_Tick(object sender, EventArgs e)
+#else
+        private void Timer_Tick(object? sender, EventArgs e)
 #endif
         {
             if (!_textTransform.HasAnimatedProperties)
@@ -585,10 +600,10 @@ namespace Common.UI.Ads
                 // Calculate base animation duration inversely proportional to duration
                 double referenceSpeed = 3000.0; // Tuned for duration=15s -> ~200px/s
                 double speed = referenceSpeed / Math.Max(1, duration);
-#if NET6_0_OR_GREATER
-                speed = Math.Clamp(speed, 3, 800); // Allow very slow speeds
-#else
+#if NET48
                 speed = Math.Max(3, Math.Min(speed, 800)); // Allow very slow speeds
+#else
+                speed = Math.Clamp(speed, 3, 800); // Allow very slow speeds
 #endif
                 double baseDuration = totalDistance / speed;
 
@@ -665,7 +680,7 @@ namespace Common.UI.Ads
                     Log($"Animation error (non-critical): {ex.Message}", true);
                     // Continue without animation - the text will still be visible
                 }
-                Log($"Animating ad {_currentAdIndex}: width={textWidth}px, fromX={fromX}, toX={toX}, duration={baseDuration + 0.5:F2}s, avg_speed={speed:F2}px/s, metadata_duration={duration}s, padding={padding}px, bannerWidth={_bannerWidth}px, visibility_time={visibilityTime:F2}s, text_center_x={textCenterX:F2}px, containerWidth={_adContainer?.ActualWidth ?? 0}, parentType={_adBanner.Parent?.GetType().Name}, keyframes=[t1={t1:F2}s,x1={x1:F2}]", true);
+                // Log($"Animating ad {_currentAdIndex}: width={textWidth}px, fromX={fromX}, toX={toX}, duration={baseDuration + 0.5:F2}s, avg_speed={speed:F2}px/s, metadata_duration={duration}s, padding={padding}px, bannerWidth={_bannerWidth}px, visibility_time={visibilityTime:F2}s, text_center_x={textCenterX:F2}px, containerWidth={_adContainer?.ActualWidth ?? 0}, parentType={_adBanner.Parent?.GetType().Name}, keyframes=[t1={t1:F2}s,x1={x1:F2}]", true, "Text");
             }
             catch (Exception ex)
             {
@@ -727,16 +742,52 @@ namespace Common.UI.Ads
                                 });
                                 if (_imageTimer == null)
                                 {
+                                    // Get the duration from the first image ad, or use 8 seconds as default
+                                    double initialDuration = _imageAds.Count > 0 ? _imageAds[0].Duration : 8;
                                     _imageTimer = new DispatcherTimer
                                     {
-                                        Interval = TimeSpan.FromSeconds(5)
+                                        Interval = TimeSpan.FromSeconds(initialDuration)
                                     };
                                     _imageTimer.Tick += ImageTimer_Tick;
+                                    Log($"Created image timer with {initialDuration} second interval (from metadata)", true, "Image");
+                                }
+
+                                // Make sure the timer is started
+                                if (!_imageTimer.IsEnabled)
+                                {
+                                    _imageTimer.Start();
+                                    Log("Started image timer during initialization", true, "Image");
+                                }
+                                else
+                                {
+                                    Log($"Image timer is already enabled, interval: {_imageTimer.Interval.TotalSeconds}s", true, "Image");
                                 }
                                 // Ensure these UI operations are dispatched to the UI thread
                                 await uiDispatcher.InvokeAsync(() => {
                                     UpdateImageAdsForLanguage();
                                     ShowNextImageAd();
+
+                                    // Add a timer to check if the image timer is working
+                                    var checkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                                    checkTimer.Tick += (s, e) => {
+                                        // Log($"Checking image timer: enabled={_imageTimer?.IsEnabled}, interval={_imageTimer?.Interval.TotalSeconds}s, current index={_currentImageAdIndex}", true, "Image");
+                                        if (_imageTimer != null && !_imageTimer.IsEnabled)
+                                        {
+                                            // Log("Image timer was stopped, restarting it", true, "Image");
+                                            _imageTimer.Start();
+                                        }
+
+                                        // Force a timer tick to ensure image rotation
+                                        if (_imageTimer != null && _imageTimer.IsEnabled)
+                                        {
+                                            // Log("Forcing image timer tick to ensure rotation", true, "Image");
+                                            ImageTimer_Tick(null, EventArgs.Empty);
+                                        }
+
+                                        // Don't stop the check timer, keep checking every 10 seconds
+                                        // checkTimer.Stop();
+                                    };
+                                    checkTimer.Start();
                                 });
                             }
                         }
@@ -856,17 +907,66 @@ namespace Common.UI.Ads
         private void ImageTimer_Tick(object sender, EventArgs e)
 #endif
         {
-            ShowNextImageAd();
+            // This is the critical method that should change the image
+            // Log($"ImageTimer_Tick fired, current index={_currentImageAdIndex}, total ads={_imageAds.Count}", true, "Image");
+
+            try
+            {
+                // Check if we have any ads to display
+                if (_imageAds == null || _imageAds.Count == 0)
+                {
+                    // Log("No image ads available to display", true, "Image");
+                    return;
+                }
+
+                // Increment the index to show the next image
+                _currentImageAdIndex = (_currentImageAdIndex + 1) % _imageAds.Count;
+                // Log($"Incremented image index to {_currentImageAdIndex}", true, "Image");
+
+                // Force the timer to stop to avoid re-entrancy
+                bool wasEnabled = false;
+                if (_imageTimer != null && _imageTimer.IsEnabled)
+                {
+                    wasEnabled = true;
+                    _imageTimer.Stop();
+                    // Log("Stopped image timer to avoid re-entrancy", true, "Image");
+                }
+
+                // Show the next ad
+                ShowNextImageAd();
+
+                // Explicitly restart the timer
+                if (_imageTimer != null && !_imageTimer.IsEnabled && wasEnabled)
+                {
+                    _imageTimer.Start();
+                    // Log("Explicitly restarted timer after showing next ad", true, "Image");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in ImageTimer_Tick: {ex.Message}", true, "Image");
+
+                // Make sure the timer is restarted even if there's an error
+                if (_imageTimer != null && !_imageTimer.IsEnabled)
+                {
+                    _imageTimer.Start();
+                    Log("Restarted timer after error", true, "Image");
+                }
+            }
         }
 
         private void ShowNextImageAd()
         {
             if (_adContainer == null || _imageAds.Count == 0 || _isTransitioning)
+            {
+                Log($"Cannot show next image ad: Container null={_adContainer == null}, ImageAds count={_imageAds.Count}, IsTransitioning={_isTransitioning}", true);
                 return;
+            }
 
             // Ensure we're on the UI thread
             if (_adContainer.Dispatcher != null && !_adContainer.Dispatcher.CheckAccess())
             {
+                Log("Dispatching ShowNextImageAd to UI thread", true);
                 _adContainer.Dispatcher.Invoke(() => ShowNextImageAd());
                 return;
             }
@@ -874,11 +974,36 @@ namespace Common.UI.Ads
             _isTransitioning = true;
             try
             {
-                var nextAd = _imageAds[_currentImageAdIndex];
-                _currentImageAdIndex = (_currentImageAdIndex + 1) % _imageAds.Count;
+                // Use the current index (already incremented in ImageTimer_Tick)
+                int currentIndex = _currentImageAdIndex;
+                var nextAd = _imageAds[currentIndex];
+
+                // Log($"Showing next image ad: Current index={currentIndex}, Total ads={_imageAds.Count}, File={nextAd.File}", true, "Image");
+
                 if (_imageTimer != null)
                 {
-                    _imageTimer.Interval = TimeSpan.FromSeconds(nextAd.Duration);
+                    // Make sure we're using the duration from the metadata
+                    double duration = nextAd.Duration;
+                    if (duration <= 0)
+                    {
+                        // If duration is invalid, use a reasonable default
+                        duration = 8;
+                        Log($"Invalid duration in metadata, using default: {duration} seconds", true, "Image");
+                    }
+
+                    // Ensure the duration is at least 1 second to prevent issues
+                    duration = Math.Max(1, duration);
+
+                    // Set the timer interval
+                    _imageTimer.Interval = TimeSpan.FromSeconds(duration);
+                    // Log($"Setting image timer interval to {duration} seconds from metadata (ad: {nextAd.File}, id: {nextAd.Id})", true, "Image");
+
+                    // Ensure the timer is stopped while we're transitioning
+                    if (_imageTimer.IsEnabled)
+                    {
+                        _imageTimer.Stop();
+                        Log("Temporarily stopped timer during transition", true, "Image");
+                    }
                 }
 
                 var newImage = new Image
@@ -923,7 +1048,7 @@ namespace Common.UI.Ads
 #endif
                     {
                         newImage.Source = cachedImage;
-                        Log($"Using cached image for: {nextAd.File}", true);
+                        // Log($"Using cached image for: {nextAd.File}", true, "Image");
                     }
                     else
                     {
@@ -958,15 +1083,45 @@ namespace Common.UI.Ads
 
                 fadeOutAnimation.Completed += (s, e) =>
                 {
+                    // Log("Fade-out animation completed", true, "Image");
                     if (_currentImageControl != null && _adContainer.Children.Contains(_currentImageControl))
                     {
                         _adContainer.Children.Remove(_currentImageControl);
+                        // Log("Removed previous image from container", true, "Image");
                     }
                     _currentImageControl = newImage;
                     _isTransitioning = false;
-                    if (_imageTimer != null && !_imageTimer.IsEnabled)
+
+                    // Always restart the timer after transition is complete
+                    if (_imageTimer != null)
                     {
-                        _imageTimer.Start();
+                        if (!_imageTimer.IsEnabled)
+                        {
+                            _imageTimer.Start();
+                            // Log("Started image timer after fade-out", true, "Image");
+                        }
+                        else
+                        {
+                            // If the timer is already running, log it
+                            // Log($"Image timer already running: interval={_imageTimer.Interval.TotalSeconds}s", true, "Image");
+                        }
+
+                        // Schedule a check to ensure the timer is working
+                        var checkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(5, _imageTimer.Interval.TotalSeconds + 2)) };
+                        checkTimer.Tick += (cs, ce) => {
+                            // Log("Checking if image rotation is working...", true, "Image");
+                            if (_imageTimer != null && !_imageTimer.IsEnabled)
+                            {
+                                // Log("Image timer stopped unexpectedly, restarting", true, "Image");
+                                _imageTimer.Start();
+                            }
+                            checkTimer.Stop();
+                        };
+                        checkTimer.Start();
+                    }
+                    else
+                    {
+                        Log("Image timer is null after fade-out", true, "Image");
                     }
                 };
 
@@ -977,11 +1132,45 @@ namespace Common.UI.Ads
                 }
                 else
                 {
+                    Log("No previous image control to fade out", true, "Image");
                     _currentImageControl = newImage;
                     _isTransitioning = false;
-                    if (_imageTimer != null && !_imageTimer.IsEnabled)
+
+                    // Always ensure the timer is started for the first image
+                    if (_imageTimer != null)
                     {
-                        _imageTimer.Start();
+                        if (!_imageTimer.IsEnabled)
+                        {
+                            _imageTimer.Start();
+                            // Log("Started image timer (first image)", true, "Image");
+                        }
+                        else
+                        {
+                            // Log($"Image timer already running (first image): interval={_imageTimer.Interval.TotalSeconds}s", true, "Image");
+                        }
+
+                        // Schedule a check to ensure the timer is working
+                        var checkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(5, _imageTimer.Interval.TotalSeconds + 2)) };
+                        checkTimer.Tick += (cs, ce) => {
+                            // Log("Checking if first image rotation is working...", true, "Image");
+                            if (_imageTimer != null && !_imageTimer.IsEnabled)
+                            {
+                                // Log("Image timer stopped unexpectedly (first image), restarting", true, "Image");
+                                _imageTimer.Start();
+                            }
+                            else if (_imageTimer != null && _imageTimer.IsEnabled)
+                            {
+                                // Force a tick to ensure rotation happens
+                                // Log("Forcing image timer tick for first image", true, "Image");
+                                ImageTimer_Tick(null, EventArgs.Empty);
+                            }
+                            checkTimer.Stop();
+                        };
+                        checkTimer.Start();
+                    }
+                    else
+                    {
+                        Log("Image timer is null (first image)", true, "Image");
                     }
                 }
             }

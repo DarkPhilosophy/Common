@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <!-- Enable nullable reference types for all projects except .NET Framework 4.8 -->
+    <Nullable Condition="'$(TargetFramework)' != 'net48'">enable</Nullable>
+    <Nullable Condition="'$(TargetFramework)' == 'net48'">disable</Nullable>
+    
+    <!-- Use the latest language version for all projects except .NET Framework 4.8 -->
+    <LangVersion Condition="'$(TargetFramework)' != 'net48'">latest</LangVersion>
+    <LangVersion Condition="'$(TargetFramework)' == 'net48'">7.3</LangVersion>
+    
+    <!-- Define constants for conditional compilation -->
+    <DefineConstants Condition="'$(TargetFramework)' == 'net48'">$(DefineConstants);NET48</DefineConstants>
+    <DefineConstants Condition="'$(TargetFramework)' != 'net48'">$(DefineConstants);NETCOREAPP</DefineConstants>
+  </PropertyGroup>
+</Project>

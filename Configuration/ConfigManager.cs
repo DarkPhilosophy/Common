@@ -520,7 +520,29 @@ namespace Common.Configuration
         {
             try
             {
-#if NET6_0_OR_GREATER
+#if NET48
+                if (type.IsValueType)
+                {
+                    return Activator.CreateInstance(type);
+                }
+
+                // For reference types, try to create an instance
+                object instance = Activator.CreateInstance(type);
+                if (instance != null)
+                {
+                    return instance;
+                }
+
+                // If instance is null, return appropriate default values
+                if (type == typeof(string))
+                {
+                    return string.Empty;
+                }
+                else
+                {
+                    return new object();
+                }
+#else
                 // Create an instance of the type
                 object? instance = Activator.CreateInstance(type);
 
@@ -544,28 +566,6 @@ namespace Common.Configuration
                 else
                 {
                     // For other reference types, create a new object
-                    return new object();
-                }
-#else
-                if (type.IsValueType)
-                {
-                    return Activator.CreateInstance(type);
-                }
-
-                // For reference types, try to create an instance
-                object instance = Activator.CreateInstance(type);
-                if (instance != null)
-                {
-                    return instance;
-                }
-
-                // If instance is null, return appropriate default values
-                if (type == typeof(string))
-                {
-                    return string.Empty;
-                }
-                else
-                {
                     return new object();
                 }
 #endif
@@ -598,10 +598,10 @@ namespace Common.Configuration
         {
             try
             {
-#if NET6_0_OR_GREATER
-                string? directory = Path.GetDirectoryName(ConfigFilePath);
-#else
+#if NET48
                 string directory = Path.GetDirectoryName(ConfigFilePath);
+#else
+                string? directory = Path.GetDirectoryName(ConfigFilePath);
 #endif
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 {

@@ -43,10 +43,8 @@ namespace Common.Update
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
 
 #if NET48
-            // Set up the GitHub API user agent for WebClient
             _webClient.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
 #else
-            // Set up the GitHub API user agent for HttpClient
             if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
                 _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
@@ -64,7 +62,6 @@ namespace Common.Update
         {
             try
             {
-                // Use the application's language resources for this message
                 if (Application.Current.Resources.Contains("CheckingForUpdatesFrom"))
                 {
                     string message = string.Format(
@@ -79,85 +76,41 @@ namespace Common.Update
                     _logger.LogInfo($"Checking for updates for {applicationName} v{currentVersion} from GitHub: {_owner}/{_repo}");
                 }
 
-                // Get the latest release from GitHub
-                // Use the GitHub API with a fallback to the HTML page if API fails
                 string apiUrl = $"https://api.github.com/repos/{_owner}/{_repo}/releases/latest";
                 string json;
 
 #if NET48
                 try
                 {
-                    // Use WebClient for .NET Framework 4.8
                     json = await _webClient.DownloadStringTaskAsync(apiUrl);
                 }
                 catch (WebException ex) when ((ex.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    // If we get a 403 Forbidden, try to get the latest release from the HTML page
                     _logger.LogInfo("GitHub API rate limit exceeded, trying alternative method...");
-
-                    // Use the releases page instead
                     string releasesUrl = $"https://github.com/{_owner}/{_repo}/releases";
                     string html = await _webClient.DownloadStringTaskAsync(releasesUrl);
-
-                    // Extract the latest version from the HTML
                     var versionMatch = Regex.Match(html, @"releases/tag/v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)");
                     if (versionMatch.Success)
                     {
                         string versionString = versionMatch.Groups[1].Value;
                         Version latestVersion = Version.Parse(versionString);
-
-                        // Try to extract release notes from the HTML
-                        string releaseNotes = "See release notes on GitHub";
-                        try
-                        {
-                            // Look for the release notes in the markdown-body class
-                            var releaseNotesMatch = Regex.Match(html, @"<div class=""markdown-body[^""]*"">(.*?)</div>\s*</div>\s*</div>", RegexOptions.Singleline);
-                            if (releaseNotesMatch.Success)
-                            {
-                                // Extract the content and clean it up
-                                string rawNotes = releaseNotesMatch.Groups[1].Value;
-
-                                // Remove HTML tags
-                                rawNotes = Regex.Replace(rawNotes, @"<[^>]+>", " ");
-
-                                // Replace multiple spaces with a single space
-                                rawNotes = Regex.Replace(rawNotes, @"\s+", " ");
-
-                                // Trim and limit length
-                                rawNotes = rawNotes.Trim();
-                                if (rawNotes.Length > 500)
-                                {
-                                    rawNotes = rawNotes.Substring(0, 497) + "...";
-                                }
-
-                                if (!string.IsNullOrWhiteSpace(rawNotes))
-                                {
-                                    releaseNotes = rawNotes;
-                                }
-                            }
-                        }
-                        catch (Exception htmlEx)
-                        {
-                            _logger.LogInfo($"Failed to extract release notes from HTML: {htmlEx.Message}. Using default message.");
-                        }
-
-                        // If the latest version is newer, return a basic UpdateInfo
+                        string releaseNotes = ExtractRawNotesFromHtml(html);
                         if (latestVersion > currentVersion)
                         {
                             _logger.LogInfo($"New version available: {latestVersion} (current: {currentVersion})");
-
                             return new UpdateInfo(
                                 latestVersion,
                                 $"https://github.com/{_owner}/{_repo}/releases/latest",
                                 $"https://github.com/{_owner}/{_repo}/releases/latest",
                                 releaseNotes,
+                                "",
                                 false,
-                                DateTime.Now
+                                DateTime.Now,
+                                true
                             );
                         }
                         else
                         {
-                            // Use the application's language resources for this message
                             if (Application.Current.Resources.Contains("NoNewVersionAvailable"))
                             {
                                 string message = string.Format(
@@ -173,12 +126,9 @@ namespace Common.Update
                             return null;
                         }
                     }
-
-                    // If we couldn't extract the version, rethrow the original exception
                     throw;
                 }
 
-                // Parse JSON using Newtonsoft.Json
                 using (var reader = new StringReader(json))
                 using (var jsonReader = new JsonTextReader(reader))
                 {
@@ -186,84 +136,182 @@ namespace Common.Update
 #else
                 try
                 {
-                    // Use HttpClient for .NET 5.0 and newer
                     var response = await _httpClient.GetAsync(apiUrl);
                     response.EnsureSuccessStatusCode();
-
                     json = await response.Content.ReadAsStringAsync();
                 }
                 catch (HttpRequestException ex) when (ex.Message.Contains("403"))
                 {
-                    // If we get a 403 Forbidden, try to get the latest release from the HTML page
                     _logger.LogInfo("GitHub API rate limit exceeded, trying alternative method...");
-
-                    // Use the releases page instead
                     string releasesUrl = $"https://github.com/{_owner}/{_repo}/releases";
                     var response = await _httpClient.GetAsync(releasesUrl);
                     response.EnsureSuccessStatusCode();
-
                     string html = await response.Content.ReadAsStringAsync();
-
-                    // Extract the latest version from the HTML
                     var versionMatch = Regex.Match(html, @"releases/tag/v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)");
                     if (versionMatch.Success)
                     {
                         string versionString = versionMatch.Groups[1].Value;
                         Version latestVersion = Version.Parse(versionString);
-
-                        // Try to extract release notes from the HTML
-                        string releaseNotes = "See release notes on GitHub";
-                        try
-                        {
-                            // Look for the release notes in the markdown-body class
-                            var releaseNotesMatch = Regex.Match(html, @"<div class=""markdown-body[^""]*"">(.*?)</div>\s*</div>\s*</div>", RegexOptions.Singleline);
-                            if (releaseNotesMatch.Success)
-                            {
-                                // Extract the content and clean it up
-                                string rawNotes = releaseNotesMatch.Groups[1].Value;
-
-                                // Remove HTML tags
-                                rawNotes = Regex.Replace(rawNotes, @"<[^>]+>", " ");
-
-                                // Replace multiple spaces with a single space
-                                rawNotes = Regex.Replace(rawNotes, @"\s+", " ");
-
-                                // Trim and limit length
-                                rawNotes = rawNotes.Trim();
-                                if (rawNotes.Length > 500)
-                                {
-                                    rawNotes = rawNotes.Substring(0, 497) + "...";
-                                }
-
-                                if (!string.IsNullOrWhiteSpace(rawNotes))
-                                {
-                                    releaseNotes = rawNotes;
-                                }
-                            }
-                        }
-                        catch (Exception htmlEx)
-                        {
-                            _logger.LogInfo($"Failed to extract release notes from HTML: {htmlEx.Message}. Using default message.");
-                        }
-
-                        // If the latest version is newer, return a basic UpdateInfo
+                        string releaseNotes = ExtractRawNotesFromHtml(html);
+                        _logger.LogInfo($"GitHubUpdateSource RAW release notes from HTML: {releaseNotes}", true);
                         if (latestVersion > currentVersion)
                         {
                             _logger.LogInfo($"New version available: {latestVersion} (current: {currentVersion})");
-
                             return new UpdateInfo(
                                 latestVersion,
                                 $"https://github.com/{_owner}/{_repo}/releases/latest",
                                 $"https://github.com/{_owner}/{_repo}/releases/latest",
                                 releaseNotes,
+                                "",
                                 false,
-                                DateTime.Now
+                                DateTime.Now,
+                                true
                             );
                         }
                         else
                         {
-                            // Use the application's language resources for this message
                             if (Application.Current.Resources.Contains("NoNewVersionAvailable"))
+                            {
+                                string message = string.Format(
+                                    Application.Current.Resources["NoNewVersionAvailable"].ToString(),
+                                    latestVersion,
+                                    currentVersion);
+                                _logger.LogInfo(message, true);
+                            }
+                            else
+                            {
+                                _logger.LogInfo($"No new version available. Latest: {latestVersion}, Current: {currentVersion}");
+                            }
+                            return null;
+                        }
+                    }
+                    throw;
+                }
+                using (JsonDocument doc = JsonDocument.Parse(json))
+                {
+                    var root = doc.RootElement;
+#endif
+#if NET48
+                    string tagName = root["tag_name"].ToString();
+                    Version latestVersion = ParseVersionFromTag(tagName);
+                    string releaseNotes = root["body"].ToString();
+                    // Log the raw release notes with newlines in a single message
+                    _logger.LogInfo($"RAW RELEASE NOTES FROM API:\n{releaseNotes}", true);
+                    string releaseUrl = root["html_url"].ToString();
+                    DateTime publishedDate = DateTime.Parse(root["published_at"].ToString());
+                    string downloadUrl = null;
+                    if (root["assets"] != null && root["assets"].Type == JTokenType.Array)
+                    {
+                        foreach (var asset in root["assets"])
+                        {
+                            string assetName = asset["name"].ToString();
+                            if (IsMatchingAsset(assetName, applicationName))
+                            {
+                                downloadUrl = asset["browser_download_url"].ToString();
+                                break;
+                            }
+                        }
+                    }
+                    if (downloadUrl == null && root["zipball_url"] != null)
+                    {
+                        downloadUrl = root["zipball_url"].ToString();
+                    }
+#else
+                    string tagName = root.GetProperty("tag_name").GetString();
+                    Version latestVersion = ParseVersionFromTag(tagName);
+                    string releaseNotes = root.GetProperty("body").GetString();
+                    // Log the raw release notes with newlines in a single message
+                    _logger.LogInfo($"RAW RELEASE NOTES FROM API (.NET Core):\n{releaseNotes}", true);
+                    string releaseUrl = root.GetProperty("html_url").GetString();
+                    DateTime publishedDate = DateTime.Parse(root.GetProperty("published_at").GetString());
+                    string downloadUrl = null;
+                    if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var asset in assets.EnumerateArray())
+                        {
+                            string assetName = asset.GetProperty("name").GetString();
+                            if (IsMatchingAsset(assetName, applicationName))
+                            {
+                                downloadUrl = asset.GetProperty("browser_download_url").GetString();
+                                break;
+                            }
+                        }
+                    }
+                    if (downloadUrl == null)
+                    {
+                        downloadUrl = root.GetProperty("zipball_url").GetString();
+                    }
+#endif
+
+                    if (latestVersion > currentVersion)
+                    {
+                        _logger.LogInfo($"New version available: {latestVersion} (current: {currentVersion})");
+                        return new UpdateInfo(
+                            latestVersion,
+                            downloadUrl,
+                            releaseUrl,
+                            releaseNotes,
+                            "",
+                            false,
+                            publishedDate,
+                            true
+                        );
+                    }
+                    else
+                    {
+                        if (Application.Current.Resources.Contains("NoNewVersionAvailable"))
+                        {
+                            string message = string.Format(
+                                Application.Current.Resources["NoNewVersionAvailable"].ToString(),
+                                latestVersion,
+                                currentVersion);
+                            _logger.LogInfo(message);
+                        }
+                        else
+                        {
+                            _logger.LogInfo($"No new version available. Latest: {latestVersion}, Current: {currentVersion}", true);
+                        }
+                        return new UpdateInfo(
+                            latestVersion,
+                            releaseUrl,
+                            releaseUrl,
+                            releaseNotes,
+                            "",
+                            false,
+                            publishedDate,
+                            false
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error checking for updates from GitHub: {ex.Message}", true);
+                try
+                {
+                    string releasesUrl = $"https://github.com/{_owner}/{_repo}/releases";
+                    _logger.LogInfo($"Attempting to get version directly from: {releasesUrl}");
+                    try
+                    {
+#if NET48
+                        string html = await _webClient.DownloadStringTaskAsync(releasesUrl);
+#else
+                        var response = await _httpClient.GetAsync(releasesUrl);
+                        response.EnsureSuccessStatusCode();
+                        string html = await response.Content.ReadAsStringAsync();
+#endif
+                        var versionMatch = Regex.Match(html, @"releases/tag/v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)");
+                        if (versionMatch.Success)
+                        {
+                            string versionString = versionMatch.Groups[1].Value;
+                            _logger.LogInfo($"Extracted raw version string from HTML: '{versionString}'");
+                            Version latestVersion = Version.Parse(versionString);
+                            _logger.LogInfo($"Successfully extracted version {latestVersion} from HTML page");
+                            string releaseNotes = ExtractRawNotesFromHtml(html);
+                            // Log the raw release notes
+                            _logger.LogInfo($"RAW RELEASE NOTES FROM HTML:\n{releaseNotes}", true);
+                            bool updateNeeded = latestVersion > currentVersion;
+                            if (Application.Current.Resources.Contains("NoNewVersionAvailable") && !updateNeeded)
                             {
                                 string message = string.Format(
                                     Application.Current.Resources["NoNewVersionAvailable"].ToString(),
@@ -273,170 +321,97 @@ namespace Common.Update
                             }
                             else
                             {
-                                _logger.LogInfo($"No new version available. Latest: {latestVersion}, Current: {currentVersion}");
+                                _logger.LogInfo($"Latest version from HTML: {latestVersion}, Current: {currentVersion}, Update needed: {updateNeeded}");
                             }
-                            return null;
+                            return new UpdateInfo(
+                                latestVersion,
+                                releasesUrl,
+                                releasesUrl,
+                                releaseNotes,
+                                "",
+                                false,
+                                DateTime.Now,
+                                updateNeeded
+                            );
                         }
                     }
-
-                    // If we couldn't extract the version, rethrow the original exception
-                    throw;
+                    catch (Exception htmlEx)
+                    {
+                        _logger.LogInfo($"Failed to extract version from HTML: {htmlEx.Message}");
+                    }
+                    _logger.LogInfo("Could not determine version from GitHub, returning null");
+                    return null;
                 }
-                using (JsonDocument doc = JsonDocument.Parse(json))
+                catch (Exception fallbackEx)
                 {
-                    var root = doc.RootElement;
-#endif
-
-#if NET48
-                    // Extract version from tag name
-                    string tagName = root["tag_name"].ToString();
-                    Version latestVersion = ParseVersionFromTag(tagName);
-
-                    // Check if the latest version is newer than the current version
-                    if (latestVersion > currentVersion)
-                    {
-                        _logger.LogInfo($"New version available: {latestVersion} (current: {currentVersion})");
-
-                        // Extract release information
-                        string releaseNotes = root["body"].ToString();
-                        string releaseUrl = root["html_url"].ToString();
-                        DateTime publishedDate = DateTime.Parse(root["published_at"].ToString());
-
-                        // Find the appropriate asset to download
-                        string downloadUrl = null;
-                        var assets = root["assets"] as JArray;
-                        if (assets != null && assets.Count > 0)
-                        {
-                            foreach (var asset in assets)
-                            {
-                                string assetName = asset["name"].ToString();
-                                if (IsMatchingAsset(assetName, applicationName))
-                                {
-                                    downloadUrl = asset["browser_download_url"].ToString();
-                                    break;
-                                }
-                            }
-                        }
-
-                        // If no specific asset was found, use the zipball URL
-                        if (downloadUrl == null)
-                        {
-                            downloadUrl = root["zipball_url"].ToString();
-                        }
-
-                        return new UpdateInfo(
-                            latestVersion,
-                            downloadUrl,
-                            releaseUrl,
-                            releaseNotes,
-                            false,
-                            publishedDate
-                        );
-                    }
-                    else
-                    {
-                        // Use the application's language resources for this message
-                        if (Application.Current.Resources.Contains("NoNewVersionAvailable"))
-                        {
-                            string message = string.Format(
-                                Application.Current.Resources["NoNewVersionAvailable"].ToString(),
-                                latestVersion,
-                                currentVersion);
-                            _logger.LogInfo(message);
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"No new version available. Latest: {latestVersion}, Current: {currentVersion}");
-                        }
-                        return null;
-                    }
+                    _logger.LogError($"Error creating fallback update info: {fallbackEx.Message}");
+                    return null;
                 }
-#else
-                    // Extract version from tag name
-                    string tagName = root.GetProperty("tag_name").GetString();
-                    Version latestVersion = ParseVersionFromTag(tagName);
-
-                    // Check if the latest version is newer than the current version
-                    if (latestVersion > currentVersion)
-                    {
-                        _logger.LogInfo($"New version available: {latestVersion} (current: {currentVersion})");
-
-                        // Extract release information
-                        string releaseNotes = root.GetProperty("body").GetString();
-                        string releaseUrl = root.GetProperty("html_url").GetString();
-                        DateTime publishedDate = DateTime.Parse(root.GetProperty("published_at").GetString());
-
-                        // Find the appropriate asset to download
-                        string downloadUrl = null;
-                        if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var asset in assets.EnumerateArray())
-                            {
-                                string assetName = asset.GetProperty("name").GetString();
-                                if (IsMatchingAsset(assetName, applicationName))
-                                {
-                                    downloadUrl = asset.GetProperty("browser_download_url").GetString();
-                                    break;
-                                }
-                            }
-                        }
-
-                        // If no specific asset was found, use the zipball URL
-                        if (downloadUrl == null)
-                        {
-                            downloadUrl = root.GetProperty("zipball_url").GetString();
-                        }
-
-                        return new UpdateInfo(
-                            latestVersion,
-                            downloadUrl,
-                            releaseUrl,
-                            releaseNotes,
-                            false,
-                            publishedDate
-                        );
-                    }
-                    else
-                    {
-                        // Use the application's language resources for this message
-                        if (Application.Current.Resources.Contains("NoNewVersionAvailable"))
-                        {
-                            string message = string.Format(
-                                Application.Current.Resources["NoNewVersionAvailable"].ToString(),
-                                latestVersion,
-                                currentVersion);
-                            _logger.LogInfo(message);
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"No new version available. Latest: {latestVersion}, Current: {currentVersion}");
-                        }
-                        return null;
-                    }
-                }
-#endif
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error checking for updates from GitHub: {ex.Message}");
-                return null;
             }
         }
 
         /// <summary>
-        /// Parses a version from a Git tag.
+        /// Cleans up release notes by removing headers, metadata, and formatting.
         /// </summary>
-        /// <param name="tagName">The tag name to parse.</param>
-        /// <returns>The parsed version.</returns>
+        /// <param name="releaseNotes">The raw release notes to clean.</param>
+        /// <returns>Cleaned release notes.</returns>
+        private string CleanReleaseNotes(string releaseNotes)
+        {
+            if (string.IsNullOrWhiteSpace(releaseNotes))
+                return releaseNotes;
+
+            _logger.LogInfo($"Cleaning release notes: {releaseNotes}", true);
+
+            // Remove any Markdown headers (# and ##)
+            releaseNotes = Regex.Replace(releaseNotes, @"^#+ .*$", "", RegexOptions.Multiline).Trim();
+
+            // Remove Build Date and SHA256 lines
+            releaseNotes = Regex.Replace(releaseNotes, @"^Build Date:.*$", "", RegexOptions.Multiline).Trim();
+            releaseNotes = Regex.Replace(releaseNotes, @"^SHA256:.*$", "", RegexOptions.Multiline).Trim();
+
+            // Remove "Changes" header
+            releaseNotes = Regex.Replace(releaseNotes, @"^Changes$", "", RegexOptions.Multiline).Trim();
+
+            // Normalize line endings
+            releaseNotes = releaseNotes.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            // Remove multiple consecutive empty lines
+            releaseNotes = Regex.Replace(releaseNotes, @"\n{3,}", "\n\n");
+
+            _logger.LogInfo($"Cleaned release notes: {releaseNotes}", true);
+            return releaseNotes;
+        }
+
+        private string ExtractRawNotesFromHtml(string html)
+        {
+            // Log a snippet of the raw HTML for debugging
+            _logger.LogInfo($"HTML snippet (first 1000 chars):\n{html.Substring(0, Math.Min(1000, html.Length))}...", true);
+
+            var releaseNotesMatch = Regex.Match(html, @"<div class=""markdown-body[^""]*"">(.*?)</div>\s*</div>\s*</div>", RegexOptions.Singleline);
+            if (releaseNotesMatch.Success)
+            {
+                string rawNotes = releaseNotesMatch.Groups[1].Value;
+
+                // Log the raw notes with HTML tags
+                _logger.LogInfo($"Raw notes with HTML tags:\n{rawNotes}", true);
+
+                // Just remove HTML tags and nothing else
+                rawNotes = Regex.Replace(rawNotes, @"<[^>]+>", "").Trim();
+
+                // Log the raw notes after HTML tags removed
+                _logger.LogInfo($"Raw notes after HTML tags removed:\n{rawNotes}", true);
+
+                return rawNotes;
+            }
+            return "No release notes available.";
+        }
+
         private Version ParseVersionFromTag(string tagName)
         {
-            // Remove leading 'v' if present
             if (tagName.StartsWith("v", StringComparison.OrdinalIgnoreCase))
             {
                 tagName = tagName.Substring(1);
             }
-
-            // Extract version numbers using regex
             var match = Regex.Match(tagName, @"(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?");
             if (match.Success)
             {
@@ -444,36 +419,22 @@ namespace Common.Update
                 int minor = int.Parse(match.Groups[2].Value);
                 int build = int.Parse(match.Groups[3].Value);
                 int revision = match.Groups[4].Success ? int.Parse(match.Groups[4].Value) : 0;
-
                 return new Version(major, minor, build, revision);
             }
-
-            // If regex fails, try parsing directly
             if (Version.TryParse(tagName, out var version))
             {
                 return version;
             }
-
-            // Default to 0.0.0.0 if parsing fails
             return new Version(0, 0, 0, 0);
         }
 
-        /// <summary>
-        /// Determines if an asset matches the application.
-        /// </summary>
-        /// <param name="assetName">The name of the asset.</param>
-        /// <param name="applicationName">The name of the application.</param>
-        /// <returns>True if the asset matches the application; otherwise, false.</returns>
         private bool IsMatchingAsset(string assetName, string applicationName)
         {
-            // Check if the asset name contains the application name (case-insensitive)
             if (assetName.IndexOf(applicationName, StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                // Check if it's an executable or zip file
                 return assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                        assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
             }
-
             return false;
         }
     }

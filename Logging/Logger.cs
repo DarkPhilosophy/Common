@@ -13,10 +13,10 @@ namespace Common.Logging
     public class Logger
     {
         // Singleton instance
-#if NET6_0_OR_GREATER
-        private static Logger? _instance;
-#else
+#if NET48
         private static Logger _instance;
+#else
+        private static Logger? _instance;
 #endif
 
         // Buffer to store log messages
@@ -29,10 +29,10 @@ namespace Common.Logging
         public delegate void LogMessageCallback(string message, bool isError, bool isWarning, bool isSuccess, bool isInfo, bool consoleOnly, Dictionary<string, object> structuredData);
 
         // Event for log message
-#if NET6_0_OR_GREATER
-        public event LogMessageCallback? OnLogMessage;
-#else
+#if NET48
         public event LogMessageCallback OnLogMessage;
+#else
+        public event LogMessageCallback? OnLogMessage;
 #endif
 
         // Dictionary to store error codes and their descriptions
@@ -89,14 +89,14 @@ namespace Common.Logging
         {
             get
             {
-#if NET6_0_OR_GREATER
-                return _instance ??= new Logger();
-#else
+#if NET48
                 if (_instance == null)
                 {
                     _instance = new Logger();
                 }
                 return _instance;
+#else
+                return _instance ??= new Logger();
 #endif
             }
         }
@@ -118,10 +118,10 @@ namespace Common.Logging
         /// <param name="isInfo">Whether the message is an informational message.</param>
         /// <param name="consoleOnly">Whether to log only to the console and not to the UI.</param>
         /// <param name="structuredData">A dictionary containing structured data to be logged.</param>
-#if NET6_0_OR_GREATER
-        public void LogMessage(string message, bool isError = false, bool isWarning = false, bool isSuccess = false, bool isInfo = false, bool consoleOnly = false, Dictionary<string, object>? structuredData = null)
-#else
+#if NET48
         public void LogMessage(string message, bool isError = false, bool isWarning = false, bool isSuccess = false, bool isInfo = false, bool consoleOnly = false, Dictionary<string, object> structuredData = null)
+#else
+        public void LogMessage(string message, bool isError = false, bool isWarning = false, bool isSuccess = false, bool isInfo = false, bool consoleOnly = false, Dictionary<string, object>? structuredData = null)
 #endif
         {
             // Create timestamp
@@ -260,13 +260,13 @@ namespace Common.Logging
                 {
                     _logBuffer.Clear();
                     // Keep the most recent MaxBufferLines lines
-#if NET6_0_OR_GREATER
-                    _logBuffer.Append(string.Join(Environment.NewLine, lines.Skip(lines.Length - MaxBufferLines)) + Environment.NewLine);
-#else
+#if NET48
                     // Manual implementation of Skip for .NET Framework 4.8
                     string[] recentLines = new string[MaxBufferLines];
                     Array.Copy(lines, lines.Length - MaxBufferLines, recentLines, 0, MaxBufferLines);
                     _logBuffer.Append(string.Join(Environment.NewLine, recentLines) + Environment.NewLine);
+#else
+                    _logBuffer.Append(string.Join(Environment.NewLine, lines.Skip(lines.Length - MaxBufferLines)) + Environment.NewLine);
 #endif
                 }
             }
@@ -299,10 +299,10 @@ namespace Common.Logging
         /// <param name="consoleOnly">Whether to log only to the console.</param>
         /// <param name="errorCode">The error code associated with the error.</param>
         /// <param name="structuredData">A dictionary containing structured data to be logged.</param>
-#if NET6_0_OR_GREATER
-        public void LogError(string message, bool consoleOnly = false, string errorCode = "", Dictionary<string, object>? structuredData = null)
-#else
+#if NET48
         public void LogError(string message, bool consoleOnly = false, string errorCode = "", Dictionary<string, object> structuredData = null)
+#else
+        public void LogError(string message, bool consoleOnly = false, string errorCode = "", Dictionary<string, object>? structuredData = null)
 #endif
         {
             var data = structuredData ?? new Dictionary<string, object>();
@@ -339,10 +339,10 @@ namespace Common.Logging
         /// <param name="message">The warning message to log.</param>
         /// <param name="consoleOnly">Whether to log only to the console.</param>
         /// <param name="structuredData">A dictionary containing structured data to be logged.</param>
-#if NET6_0_OR_GREATER
-        public void LogWarning(string message, bool consoleOnly = false, Dictionary<string, object>? structuredData = null)
-#else
+#if NET48
         public void LogWarning(string message, bool consoleOnly = false, Dictionary<string, object> structuredData = null)
+#else
+        public void LogWarning(string message, bool consoleOnly = false, Dictionary<string, object>? structuredData = null)
 #endif
         {
             LogMessage(message, isWarning: true, consoleOnly: consoleOnly, structuredData: structuredData);
@@ -355,10 +355,10 @@ namespace Common.Logging
         /// <param name="context">Additional context information about where the exception occurred.</param>
         /// <param name="errorCode">The error code associated with the exception.</param>
         /// <param name="consoleOnly">Whether to log only to the console.</param>
-#if NET6_0_OR_GREATER
-        public void LogException(Exception ex, string? context = null, string? errorCode = null, bool consoleOnly = false)
-#else
+#if NET48
         public void LogException(Exception ex, string context = "", string errorCode = "", bool consoleOnly = false)
+#else
+        public void LogException(Exception ex, string? context = null, string? errorCode = null, bool consoleOnly = false)
 #endif
         {
             if (ex == null)
@@ -425,10 +425,10 @@ namespace Common.Logging
         /// <param name="errorCode">The error code.</param>
         /// <param name="additionalContext">Additional context to include in the message.</param>
         /// <returns>A user-friendly error message with suggestions.</returns>
-#if NET6_0_OR_GREATER
-        public string GetUserFriendlyErrorMessage(string errorCode, string? additionalContext = null)
-#else
+#if NET48
         public string GetUserFriendlyErrorMessage(string errorCode, string additionalContext = "")
+#else
+        public string GetUserFriendlyErrorMessage(string errorCode, string? additionalContext = null)
 #endif
         {
             if (string.IsNullOrEmpty(errorCode))

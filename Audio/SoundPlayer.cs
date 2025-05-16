@@ -1,552 +1,561 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Media;
 using System.Reflection;
-using System.Threading;
+using System.Resources;
 using Common.Logging;
+using System.Windows;
 
 namespace Common.Audio
 {
     /// <summary>
-    /// Provides sound playback functionality for applications.
-    /// This class handles playing sound effects for UI interactions.
+    /// Dynamically plays sound effects, auto-detecting embedded or local sources.
     /// </summary>
     public static class SoundPlayer
     {
-        // Dictionary to store sound paths by name
-        private static readonly Dictionary<string, string> SoundPaths = new Dictionary<string, string>();
-
-        // Default sound names
-        public const string ButtonClick = "ButtonClick";
-        public const string Success = "Success";
-        public const string Error = "Error";
-        public const string Warning = "Warning";
-        public const string Notification = "Notification";
+        private static readonly Dictionary<string, (string Path, Assembly Assembly)> SoundRegistry = new Dictionary<string, (string, Assembly)>();
 
         /// <summary>
-        /// Registers a sound with a specific name and path.
+        /// Registers a sound with a path and optional assembly.
         /// </summary>
-        /// <param name="soundName">The name to associate with the sound.</param>
-        /// <param name="soundPath">The path to the sound file.</param>
-        public static void RegisterSound(string soundName, string soundPath)
+        /// <param name="soundName">Sound identifier.</param>
+        /// <param name="soundPath">Path (resource name or file path).</param>
+        /// <param name="assembly">Assembly for embedded sound (default: entry assembly).</param>
+        public static void RegisterSound(string soundName, string soundPath, Assembly assembly = null)
         {
-            SoundPaths[soundName] = soundPath;
+            Logger.Instance.LogInfo($"SoundPlayer: RegisterSound called with name: '{soundName}', path: '{soundPath}', assembly: {assembly?.FullName ?? "null (will use entry assembly)"}", true);
+
+            if (string.IsNullOrEmpty(soundName) || string.IsNullOrEmpty(soundPath))
+            {
+                Logger.Instance.LogWarning("SoundPlayer: Sound name or path cannot be empty.", true);
+                return;
+            }
+
+            assembly = assembly ?? Assembly.GetEntryAssembly();
+            if (assembly == null)
+            {
+                Logger.Instance.LogWarning("SoundPlayer: No assembly provided and entry assembly is null.", true);
+                return;
+            }
+
+            Logger.Instance.LogInfo($"SoundPlayer: Using assembly: {assembly.FullName}", true);
+
+            // Get all resources in the assembly
+            var resources = assembly.GetManifestResourceNames();
+
+            SoundRegistry[soundName] = (soundPath, assembly);
+            Logger.Instance.LogInfo($"SoundPlayer: Successfully registered sound '{soundName}' with path '{soundPath}'", true);
         }
 
         /// <summary>
-        /// Registers a sound with a specific name from embedded resources.
+        /// Plays a sound by name, auto-detecting embedded or local source.
         /// </summary>
-        /// <param name="soundName">The name to associate with the sound.</param>
-        /// <param name="resourcePath">The resource path within the assembly.</param>
-        /// <param name="assembly">The assembly containing the resource (null for entry assembly).</param>
-#if NET6_0_OR_GREATER
-        public static void RegisterEmbeddedSound(string soundName, string resourcePath, Assembly? assembly = null)
-#else
-        public static void RegisterEmbeddedSound(string soundName, string resourcePath, Assembly assembly = null)
-#endif
+        /// <param name="soundName">Sound identifier.</param>
+        public static void PlaySound(string soundName)
         {
-            // Store the resource path with a special prefix to indicate it's an embedded resource
-#if NET6_0_OR_GREATER
-            SoundPaths[soundName] = "embedded:" + resourcePath + "|" + (assembly?.FullName ?? Assembly.GetEntryAssembly()?.FullName ?? "");
-#else
-            SoundPaths[soundName] = "embedded:" + resourcePath + "|" + (assembly != null ? assembly.FullName : (Assembly.GetEntryAssembly() != null ? Assembly.GetEntryAssembly().FullName : ""));
-#endif
+            if (string.IsNullOrEmpty(soundName))
+            {
+                Logger.Instance.LogWarning("Sound name cannot be empty.", true);
+                return;
+            }
+
+            Logger.Instance.LogInfo($"SoundPlayer: Attempting to play sound '{soundName}'", true);
+
+            // Get executing and entry assemblies for later use if needed
+            Assembly executingAssembly = Assembly.GetExecutingAssembly();
+            Assembly entryAssembly = Assembly.GetEntryAssembly();
+
+            if (!SoundRegistry.TryGetValue(soundName, out var soundInfo))
+            {
+                Logger.Instance.LogWarning($"Sound '{soundName}' not registered.", true);
+                return;
+            }
+
+            Logger.Instance.LogInfo($"SoundPlayer: Found sound '{soundName}' in registry, path: '{soundInfo.Path}', has assembly: {soundInfo.Assembly != null}", true);
+            PlaySoundInternal(soundInfo.Path, soundInfo.Assembly);
         }
 
-        /// <summary>
-        /// Registers common sounds with default paths.
-        /// </summary>
-        /// <param name="basePath">The base path for sound files (default is assets/Sounds).</param>
-        public static void RegisterCommonSounds(string basePath = "assets/Sounds")
+        private static void PlaySoundInternal(string path, Assembly assembly)
+        {
+            Logger.Instance.LogInfo($"SoundPlayer: PlaySoundInternal called with path: '{path}', assembly: {assembly?.FullName ?? "null"}", true);
+
+            // Try embedded first with the provided assembly
+            Logger.Instance.LogInfo($"SoundPlayer: Trying to play embedded sound from path: '{path}' with provided assembly", true);
+            if (TryPlayEmbeddedSound(path, assembly))
+            {
+                Logger.Instance.LogInfo($"SoundPlayer: Successfully played embedded sound from path: '{path}' with provided assembly", true);
+                return;
+            }
+
+            // If that fails, try with the entry assembly if it's different
+            Assembly entryAssembly = Assembly.GetEntryAssembly();
+            if (entryAssembly != null && entryAssembly != assembly)
+            {
+                Logger.Instance.LogInfo($"SoundPlayer: Trying to play embedded sound from path: '{path}' with entry assembly: {entryAssembly.FullName}", true);
+                if (TryPlayEmbeddedSound(path, entryAssembly))
+                {
+                    Logger.Instance.LogInfo($"SoundPlayer: Successfully played embedded sound from path: '{path}' with entry assembly", true);
+                    return;
+                }
+            }
+
+            // Also try with the executing assembly if it's different
+            Assembly executingAssembly = Assembly.GetExecutingAssembly();
+            if (executingAssembly != assembly && executingAssembly != entryAssembly)
+            {
+                Logger.Instance.LogInfo($"SoundPlayer: Trying to play embedded sound from path: '{path}' with executing assembly: {executingAssembly.FullName}", true);
+                if (TryPlayEmbeddedSound(path, executingAssembly))
+                {
+                    Logger.Instance.LogInfo($"SoundPlayer: Successfully played embedded sound from path: '{path}' with executing assembly", true);
+                    return;
+                }
+            }
+
+            // Fall back to local
+            Logger.Instance.LogInfo($"SoundPlayer: Falling back to local sound from path: '{path}'", true);
+            bool localSuccess = TryPlayLocalSound(path);
+            Logger.Instance.LogInfo($"SoundPlayer: Local sound playback result: {(localSuccess ? "Success" : "Failed")}", true);
+        }
+
+        private static bool TryPlayEmbeddedSound(string resourcePath, Assembly assembly)
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine("RegisterCommonSounds called");
-
-                // Try different resource paths for the embedded sounds
-                // The resource name format can vary depending on how the resources are embedded
-
-                // Try with Common.Audio prefix (as specified in the LogicalName)
-                RegisterEmbeddedSound(ButtonClick, "Common.Audio.ui-minimal-click.wav");
-
-                // Try with CSVGenerator prefix
-                RegisterEmbeddedSound(ButtonClick, "CSVGenerator.assets.Sounds.ui-minimal-click.wav");
-
-                // Try with ConfigReplacer prefix
-                RegisterEmbeddedSound(ButtonClick, "ConfigReplacer.assets.Sounds.ui-minimal-click.wav");
-
-                // Try with just the filename
-                RegisterEmbeddedSound(ButtonClick, "ui-minimal-click.wav");
-
-                // Try with assets/Sounds prefix
-                RegisterEmbeddedSound(ButtonClick, "assets.Sounds.ui-minimal-click.wav");
-
-                // Also register the sounds as file paths as a fallback
-                RegisterSound(ButtonClick, Path.Combine(basePath, "ui-minimal-click.wav"));
-                RegisterSound(Success, Path.Combine(basePath, "success.wav"));
-                RegisterSound(Error, Path.Combine(basePath, "error.wav"));
-                RegisterSound(Warning, Path.Combine(basePath, "warning.wav"));
-                RegisterSound(Notification, Path.Combine(basePath, "notification.wav"));
-
-                // Try to list all embedded resources in the entry assembly to help with debugging
-                try
+                if (assembly == null)
                 {
-                    var assembly = Assembly.GetEntryAssembly();
-                    if (assembly != null)
-                    {
-                        System.Diagnostics.Debug.WriteLine("Available embedded resources in entry assembly:");
-                        foreach (var resource in assembly.GetManifestResourceNames())
-                        {
-                            System.Diagnostics.Debug.WriteLine($"  - {resource}");
-                        }
-                    }
+                    Logger.Instance.LogWarning($"SoundPlayer: Assembly is null for resource path: '{resourcePath}'", true);
+                    return false;
                 }
-                catch (Exception ex)
+
+                Logger.Instance.LogInfo($"SoundPlayer: Getting manifest resource stream for path: '{resourcePath}' from assembly: {assembly.FullName}", true);
+
+                // Get all resources in the assembly
+                var resources = assembly.GetManifestResourceNames();
+
+                // Check for any .g.resources files
+                foreach (var resource in resources)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Error listing embedded resources: {ex.Message}");
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log the exception but continue
-                System.Diagnostics.Debug.WriteLine($"Error registering common sounds: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Plays a button click sound.
-        /// </summary>
-        public static void PlayButtonClickSound()
-        {
-            System.Diagnostics.Debug.WriteLine("PlayButtonClickSound called");
-            try { Logger.Instance.LogInfo("PlayButtonClickSound called", true); } catch { }
-
-            // Try to play the sound directly from the embedded resource
-            try
-            {
-                // Try to find the assembly that contains the sound file
-                var assemblies = new List<Assembly>();
-
-                // Add assemblies with null checks
-                var entryAssembly = Assembly.GetEntryAssembly();
-                if (entryAssembly != null) assemblies.Add(entryAssembly);
-
-                var executingAssembly = Assembly.GetExecutingAssembly();
-                if (executingAssembly != null) assemblies.Add(executingAssembly);
-
-                var callingAssembly = Assembly.GetCallingAssembly();
-                if (callingAssembly != null) assemblies.Add(callingAssembly);
-
-                // Try to load Common assembly explicitly
-                try { assemblies.Add(Assembly.Load("Common")); } catch { }
-
-                // Try to load CSVGenerator assembly explicitly
-                try { assemblies.Add(Assembly.Load("CSVGenerator")); } catch { }
-
-                // Try to load ConfigReplacer assembly explicitly
-                try { assemblies.Add(Assembly.Load("ConfigReplacer")); } catch { }
-
-                // Remove null assemblies
-                assemblies.RemoveAll(a => a == null);
-
-                // Try different resource paths
-                var resourcePaths = new List<string>
-                {
-                    "Common.Audio.ui-minimal-click.wav",
-                    "CSVGenerator.assets.Sounds.ui-minimal-click.wav",
-                    "ConfigReplacer.assets.Sounds.ui-minimal-click.wav",
-                    "ui-minimal-click.wav",
-                    "assets.Sounds.ui-minimal-click.wav"
-                };
-
-                bool soundPlayed = false;
-
-                foreach (var assembly in assemblies)
-                {
-                    if (assembly == null) continue;
-
-                    // Log the assembly name
-                    System.Diagnostics.Debug.WriteLine($"Checking assembly: {assembly.FullName}");
-                    try { Logger.Instance.LogInfo($"Checking assembly: {assembly.FullName}", true); } catch { }
-
-                    // Log all resources in the assembly
-                    try
-                    {
-                        var resources = assembly.GetManifestResourceNames();
-                        System.Diagnostics.Debug.WriteLine($"Resources in assembly {assembly.FullName}: {string.Join(", ", resources)}");
-                        try { Logger.Instance.LogInfo($"Resources in assembly {assembly.FullName}: {string.Join(", ", resources)}", true); } catch { }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Error getting resources from assembly {assembly.FullName}: {ex.Message}");
-                        try { Logger.Instance.LogInfo($"Error getting resources from assembly {assembly.FullName}: {ex.Message}", true); } catch { }
-                    }
-
-                    foreach (var resourcePath in resourcePaths)
+                    if (resource.EndsWith(".g.resources"))
                     {
                         try
                         {
-                            var stream = assembly.GetManifestResourceStream(resourcePath);
-                            if (stream != null)
+                            // Try to extract the sound from the .g.resources file
+                            using (var gResourceStream = assembly.GetManifestResourceStream(resource))
                             {
-                                System.Diagnostics.Debug.WriteLine($"Found resource {resourcePath} in assembly {assembly.FullName}");
-                                try { Logger.Instance.LogInfo($"Found resource {resourcePath} in assembly {assembly.FullName}", true); } catch { }
-
-                                using (var player = new System.Media.SoundPlayer(stream))
+                                if (gResourceStream != null)
                                 {
-                                    player.Play();
-                                    soundPlayed = true;
-                                    System.Diagnostics.Debug.WriteLine($"Successfully played sound from resource {resourcePath}");
-                                    try { Logger.Instance.LogInfo($"Successfully played sound from resource {resourcePath}", true); } catch { }
-                                    break;
+                                    Logger.Instance.LogInfo($"SoundPlayer: Found {resource} with length: {gResourceStream.Length} bytes", true);
+
+                                    // Create a ResourceReader to read the .g.resources file
+                                    using (var reader = new System.Resources.ResourceReader(gResourceStream))
+                                    {
+                                        // Enumerate through all resources in the .g.resources file
+                                        IDictionaryEnumerator enumerator = reader.GetEnumerator();
+                                        while (enumerator.MoveNext())
+                                        {
+                                            string resourceName = enumerator.Key?.ToString() ?? string.Empty;
+                                            Logger.Instance.LogInfo($"SoundPlayer: Found resource in {resource}: '{resourceName}'", true);
+
+                                            // Extract the sound file name from the resourcePath
+                                            string soundFileName = Path.GetFileName(resourcePath);
+
+                                            // Check if this is our sound file - use more flexible matching
+                                            if (!string.IsNullOrEmpty(soundFileName) &&
+                                                (resourceName.EndsWith(soundFileName, StringComparison.OrdinalIgnoreCase) ||
+                                                resourceName.EndsWith(Path.ChangeExtension(soundFileName, ".baml"), StringComparison.OrdinalIgnoreCase) ||
+                                                resourceName.IndexOf(soundFileName, StringComparison.OrdinalIgnoreCase) >= 0))
+                                            {
+                                                Logger.Instance.LogInfo($"SoundPlayer: Found sound resource: '{resourceName}'", true);
+
+                                                // Get the resource value (should be a byte array or Stream)
+                                                object resourceValue = enumerator.Value;
+                                                if (resourceValue is byte[] soundBytes)
+                                                {
+                                                    Logger.Instance.LogInfo($"SoundPlayer: Resource is byte array with length: {soundBytes.Length} bytes", true);
+
+                                                    // Create a memory stream from the byte array
+                                                    using (var memoryStream = new MemoryStream(soundBytes))
+                                                    {
+                                                        // Play the sound from the memory stream
+                                                        System.Media.SoundPlayer player = new System.Media.SoundPlayer(memoryStream);
+                                                        try
+                                                        {
+                                                            Logger.Instance.LogInfo($"SoundPlayer: Playing sound from {resource}: '{resourceName}'", true);
+                                                            player.Play();
+                                                            Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from {resource}: '{resourceName}'", true);
+                                                            return true;
+                                                        }
+                                                        finally
+                                                        {
+                                                            player.Dispose();
+                                                        }
+                                                    }
+                                                }
+                                                else if (resourceValue is Stream resourceValueStream)
+                                                {
+                                                    Logger.Instance.LogInfo($"SoundPlayer: Resource is Stream with length: {resourceValueStream.Length} bytes", true);
+
+                                                    // Play the sound from the stream
+                                                    System.Media.SoundPlayer player = new System.Media.SoundPlayer(resourceValueStream);
+                                                    try
+                                                    {
+                                                        Logger.Instance.LogInfo($"SoundPlayer: Playing sound from {resource}: '{resourceName}'", true);
+                                                        player.Play();
+                                                        Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from {resource}: '{resourceName}'", true);
+                                                        return true;
+                                                    }
+                                                    finally
+                                                    {
+                                                        player.Dispose();
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    Logger.Instance.LogWarning($"SoundPlayer: Resource is not a byte array or Stream, it's a {resourceValue?.GetType().Name ?? "null"}", true);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                         catch (Exception ex)
                         {
-                            System.Diagnostics.Debug.WriteLine($"Error accessing resource {resourcePath} in assembly {assembly.FullName}: {ex.Message}");
-                            try { Logger.Instance.LogInfo($"Error accessing resource {resourcePath} in assembly {assembly.FullName}: {ex.Message}", true); } catch { }
+                            Logger.Instance.LogWarning($"SoundPlayer: Error reading {resource} file: {ex.Message}", true);
+                            Logger.Instance.LogWarning($"SoundPlayer: Exception details: {ex}", true);
+                        }
+                    }
+                }
+
+                // Also check for direct embedded resources with the exact name
+                try
+                {
+                    // Try to find the resource with the exact name
+                    var directResourcePath = resourcePath;
+                    Logger.Instance.LogInfo($"SoundPlayer: Trying direct resource path: '{directResourcePath}'", true);
+
+                    using (var directStream = assembly.GetManifestResourceStream(directResourcePath))
+                    {
+                        if (directStream != null)
+                        {
+                            Logger.Instance.LogInfo($"SoundPlayer: Found direct resource with length: {directStream.Length} bytes", true);
+
+                            // Play the sound from the stream
+                            System.Media.SoundPlayer player = new System.Media.SoundPlayer(directStream);
+                            try
+                            {
+                                Logger.Instance.LogInfo($"SoundPlayer: Playing sound from direct resource: '{directResourcePath}'", true);
+                                player.Play();
+                                Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from direct resource: '{directResourcePath}'", true);
+                                return true;
+                            }
+                            finally
+                            {
+                                player.Dispose();
+                            }
                         }
                     }
 
-                    if (soundPlayed) break;
-                }
-
-                if (!soundPlayed)
-                {
-                    System.Diagnostics.Debug.WriteLine("Failed to play sound directly, falling back to PlayNamedSound");
-                    try { Logger.Instance.LogInfo("Failed to play sound directly, falling back to PlayNamedSound", true); } catch { }
-                    PlayNamedSound(ButtonClick);
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error in PlayButtonClickSound: {ex.Message}");
-                try { Logger.Instance.LogInfo($"Error in PlayButtonClickSound: {ex.Message}", true); } catch { }
-
-                // Fall back to the original method
-                PlayNamedSound(ButtonClick);
-            }
-        }
-
-        /// <summary>
-        /// Plays a sound by its registered name.
-        /// </summary>
-        /// <param name="soundName">The name of the sound to play.</param>
-        public static void PlayNamedSound(string soundName)
-        {
-            try
-            {
-                // Check if the sound is registered
-#if NET6_0_OR_GREATER
-                if (!SoundPaths.TryGetValue(soundName, out string? path) || path == null)
-#else
-                string path;
-                if (!SoundPaths.TryGetValue(soundName, out path) || path == null)
-#endif
-                {
-                    // If not registered, try to find it in the default location
-                    path = Path.Combine("assets", "Sounds", soundName + ".wav");
-                    System.Diagnostics.Debug.WriteLine($"Sound '{soundName}' not registered, trying default path: {path}");
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine($"Playing registered sound '{soundName}' from path: {path}");
-                }
-
-                // Check if it's an embedded resource
-                if (path.StartsWith("embedded:"))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Playing embedded sound: {path}");
-                    PlayEmbeddedSound(path.Substring(9));
-                    return;
-                }
-
-                // Otherwise play from file path
-                System.Diagnostics.Debug.WriteLine($"Playing sound from file: {path}");
-                PlaySound(path);
-            }
-            catch (Exception ex)
-            {
-                // Log the exception but continue
-                System.Diagnostics.Debug.WriteLine($"Error playing sound '{soundName}': {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Plays an embedded sound resource.
-        /// </summary>
-        /// <param name="resourceInfo">The resource information (path|assembly).</param>
-        private static void PlayEmbeddedSound(string resourceInfo)
-        {
-            try
-            {
-                // Split the resource info into path and assembly
-                string[] parts = resourceInfo.Split('|');
-                string resourcePath = parts[0];
-                string assemblyName = parts.Length > 1 ? parts[1] : "";
-
-                // Log to both Debug and Logger
-                System.Diagnostics.Debug.WriteLine($"Playing embedded sound: Resource path={resourcePath}, Assembly={assemblyName}");
-                try { Logger.Instance.LogInfo($"Playing embedded sound: Resource path={resourcePath}, Assembly={assemblyName}", true); } catch { }
-
-                // Try to find the assembly in multiple ways
-#if NET6_0_OR_GREATER
-                List<Assembly?> assemblies = new List<Assembly?>();
-#else
-                List<Assembly> assemblies = new List<Assembly>();
-#endif
-
-                // 1. Try the entry assembly
-                var entryAssembly = Assembly.GetEntryAssembly();
-                if (entryAssembly != null)
-                {
-                    assemblies.Add(entryAssembly);
-                }
-
-                // 2. Try the executing assembly
-                var executingAssembly = Assembly.GetExecutingAssembly();
-                if (executingAssembly != null)
-                {
-                    assemblies.Add(executingAssembly);
-                }
-
-                // 3. Try the calling assembly
-                var callingAssembly = Assembly.GetCallingAssembly();
-                if (callingAssembly != null)
-                {
-                    assemblies.Add(callingAssembly);
-                }
-
-                // 4. Try to load by name if provided
-                if (!string.IsNullOrEmpty(assemblyName))
-                {
-                    try
+                    // Try to find the sound file in any embedded resource by searching through all resources
+                    foreach (var resourceName in resources)
                     {
-                        assemblies.Add(Assembly.Load(assemblyName));
-                    }
-                    catch (Exception ex)
-                    {
-                        try { Logger.Instance.LogInfo($"Failed to load assembly {assemblyName}: {ex.Message}", true); } catch { }
-                    }
-                }
+                        // Extract the sound file name from the resourcePath
+                        string soundFileName = Path.GetFileName(resourcePath);
 
-                // 5. Try to load Common assembly explicitly
-                try
-                {
-                    assemblies.Add(Assembly.Load("Common"));
-                }
-                catch (Exception ex)
-                {
-                    try { Logger.Instance.LogInfo($"Failed to load Common assembly: {ex.Message}", true); } catch { }
-                }
+                        // Skip if the resource doesn't contain the sound file name
+                        if (resourceName.IndexOf(soundFileName, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
 
-                // 6. Try to load CSVGenerator assembly explicitly
-                try
-                {
-                    assemblies.Add(Assembly.Load("CSVGenerator"));
-                }
-                catch (Exception ex)
-                {
-                    try { Logger.Instance.LogInfo($"Failed to load CSVGenerator assembly: {ex.Message}", true); } catch { }
-                }
+                        Logger.Instance.LogInfo($"SoundPlayer: Trying to load sound directly from resource: '{resourceName}'", true);
 
-                // 7. Try to load ConfigReplacer assembly explicitly
-                try
-                {
-                    assemblies.Add(Assembly.Load("ConfigReplacer"));
-                }
-                catch (Exception ex)
-                {
-                    try { Logger.Instance.LogInfo($"Failed to load ConfigReplacer assembly: {ex.Message}", true); } catch { }
-                }
-
-                // Remove null assemblies
-                assemblies.RemoveAll(a => a == null);
-
-                // Log the assemblies we found (only in debug mode)
-                try { Logger.Instance.LogInfo($"Found {assemblies.Count} assemblies to search for resources", false); } catch { }
-
-                // Try different resource paths in each assembly
-                List<string> resourcePaths = new List<string>
-                {
-                    resourcePath,
-                    "Common.Audio.ui-minimal-click.wav",
-                    "CSVGenerator.assets.Sounds.ui-minimal-click.wav",
-                    "ConfigReplacer.assets.Sounds.ui-minimal-click.wav",
-                    "ui-minimal-click.wav",
-                    "assets.Sounds.ui-minimal-click.wav"
-                };
-
-                // We don't need to log all resources in all assemblies
-                // This was causing excessive logging
-
-                // Try to find and play the sound from any of the assemblies and resource paths
-                bool soundPlayed = false;
-
-                foreach (var asm in assemblies)
-                {
-                    if (asm == null) continue;
-
-                    foreach (var resPath in resourcePaths)
-                    {
                         try
                         {
-                            // Try to get the resource stream
-                            var stream = asm.GetManifestResourceStream(resPath);
-                            if (stream != null)
+                            using (var directStream = assembly.GetManifestResourceStream(resourceName))
                             {
-                                // Log resource found with minimal information
-                                try { Logger.Instance.LogInfo($"Found sound resource", false); } catch { }
-
-                                try
+                                if (directStream != null)
                                 {
-                                    // Play the sound directly from the stream
-#if NET6_0_OR_GREATER
-                                    using (var player = new System.Media.SoundPlayer(stream))
-                                    {
-                                        player.Play();
-                                    }
-#else
-                                    var player = new System.Media.SoundPlayer(stream);
+                                    Logger.Instance.LogInfo($"SoundPlayer: Found resource with length: {directStream.Length} bytes", true);
+
+                                    // Play the sound from the stream
+                                    System.Media.SoundPlayer player = new System.Media.SoundPlayer(directStream);
                                     try
                                     {
+                                        Logger.Instance.LogInfo($"SoundPlayer: Playing sound from resource: '{resourceName}'", true);
                                         player.Play();
+                                        Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from resource: '{resourceName}'", true);
+                                        return true;
                                     }
                                     finally
                                     {
                                         player.Dispose();
                                     }
-#endif
-                                    soundPlayed = true;
-                                    // Log success with minimal information
-                                    try { Logger.Instance.LogInfo("Successfully played sound", false); } catch { }
-                                    break;
-                                }
-                                catch (Exception ex)
-                                {
-                                    try { Logger.Instance.LogInfo($"Failed to play sound directly from stream: {ex.Message}", false); } catch { }
-
-                                    // If direct stream playback fails, try creating a temporary file
-                                    try
-                                    {
-                                        // Create a temporary file to play the sound
-                                        string tempFile = Path.Combine(Path.GetTempPath(), Path.GetFileName(resPath));
-                                        using (var fileStream = File.Create(tempFile))
-                                        {
-                                            stream.Position = 0; // Reset stream position
-                                            stream.CopyTo(fileStream);
-                                        }
-
-                                        // Play the temporary file
-#if NET6_0_OR_GREATER
-                                        using (var filePlayer = new System.Media.SoundPlayer(tempFile))
-                                        {
-                                            filePlayer.Play();
-                                        }
-#else
-                                        var filePlayer = new System.Media.SoundPlayer(tempFile);
-                                        try
-                                        {
-                                            filePlayer.Play();
-                                        }
-                                        finally
-                                        {
-                                            filePlayer.Dispose();
-                                        }
-#endif
-                                        soundPlayed = true;
-                                        try { Logger.Instance.LogInfo("Successfully played sound from temporary file", false); } catch { }
-                                        break;
-                                    }
-                                    catch (Exception ex2)
-                                    {
-                                        try { Logger.Instance.LogInfo($"Failed to play sound from temporary file: {ex2.Message}", false); } catch { }
-                                    }
-                                }
-                                finally
-                                {
-                                    stream.Dispose();
                                 }
                             }
                         }
                         catch (Exception ex)
                         {
-                            try { Logger.Instance.LogInfo($"Error accessing sound resource: {ex.Message}", false); } catch { }
+                            Logger.Instance.LogWarning($"SoundPlayer: Error playing from resource {resourceName}: {ex.Message}", true);
                         }
                     }
 
-                    if (soundPlayed) break;
-                }
-
-                if (!soundPlayed)
-                {
-                    try { Logger.Instance.LogInfo("Failed to play sound from any resource", false); } catch { }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log the error but continue
-                try { Logger.Instance.LogInfo($"Error playing sound: {ex.Message}", false); } catch { }
-            }
-        }
-
-        /// <summary>
-        /// Plays a sound from the specified file path.
-        /// </summary>
-        /// <param name="soundPath">The path to the sound file.</param>
-        public static void PlaySound(string soundPath)
-        {
-            try
-            {
-                if (File.Exists(soundPath))
-                {
-#if NET6_0_OR_GREATER
-                    using (var player = new System.Media.SoundPlayer(soundPath))
+                    // Look for .g.resources files and try to find the sound file inside them
+                    foreach (var resourceName in resources)
                     {
-                        player.Play();
+                        if (resourceName.EndsWith(".g.resources"))
+                        {
+                            try
+                            {
+                                using (var gResourceStream = assembly.GetManifestResourceStream(resourceName))
+                                {
+                                    if (gResourceStream != null)
+                                    {
+                                        Logger.Instance.LogInfo($"SoundPlayer: Examining .g.resources file: {resourceName}", true);
+
+                                        using (var reader = new ResourceReader(gResourceStream))
+                                        {
+                                            IDictionaryEnumerator enumerator = reader.GetEnumerator();
+                                            string soundFileName = Path.GetFileName(resourcePath);
+
+                                            while (enumerator.MoveNext())
+                                            {
+                                                string entryName = enumerator.Key?.ToString() ?? string.Empty;
+                                                Logger.Instance.LogInfo($"SoundPlayer: Found entry in .g.resources: '{entryName}'", true);
+
+                                                if (entryName.IndexOf(soundFileName, StringComparison.OrdinalIgnoreCase) >= 0)
+                                                {
+                                                    Logger.Instance.LogInfo($"SoundPlayer: Found matching sound entry: '{entryName}'", true);
+
+                                                    object resourceValue = enumerator.Value;
+                                                    if (resourceValue is byte[] soundBytes)
+                                                    {
+                                                        using (var memoryStream = new MemoryStream(soundBytes))
+                                                        {
+                                                            System.Media.SoundPlayer player = new System.Media.SoundPlayer(memoryStream);
+                                                            try
+                                                            {
+                                                                Logger.Instance.LogInfo($"SoundPlayer: Playing sound from .g.resources entry: '{entryName}'", true);
+                                                                player.Play();
+                                                                Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from .g.resources entry: '{entryName}'", true);
+                                                                return true;
+                                                            }
+                                                            finally
+                                                            {
+                                                                player.Dispose();
+                                                            }
+                                                        }
+                                                    }
+                                                    else if (resourceValue is Stream resourceValueStream)
+                                                    {
+                                                        System.Media.SoundPlayer player = new System.Media.SoundPlayer(resourceValueStream);
+                                                        try
+                                                        {
+                                                            Logger.Instance.LogInfo($"SoundPlayer: Playing sound from .g.resources entry: '{entryName}'", true);
+                                                            player.Play();
+                                                            Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from .g.resources entry: '{entryName}'", true);
+                                                            return true;
+                                                        }
+                                                        finally
+                                                        {
+                                                            player.Dispose();
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Instance.LogWarning($"SoundPlayer: Error examining .g.resources file {resourceName}: {ex.Message}", true);
+                            }
+                        }
                     }
-#else
-                    var player = new System.Media.SoundPlayer(soundPath);
+
+                    // Try to find the sound file with the exact resource name (for custom logical names)
                     try
                     {
+                        // Try with the exact resource name as specified in the project file
+                        foreach (var resource in resources)
+                        {
+                            if (resource.IndexOf(resourcePath.Replace('\\', '.').Replace('/', '.'), StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                resource.EndsWith(".g.resources.app.sounds." + Path.GetFileName(resourcePath), StringComparison.OrdinalIgnoreCase))
+                            {
+                                Logger.Instance.LogInfo($"SoundPlayer: Found resource with matching path in name: '{resource}'", true);
+                                using (var stream = assembly.GetManifestResourceStream(resource))
+                                {
+                                    if (stream != null)
+                                    {
+                                        System.Media.SoundPlayer player = new System.Media.SoundPlayer(stream);
+                                        try
+                                        {
+                                            player.Play();
+                                            Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound from resource: '{resource}'", true);
+                                            return true;
+                                        }
+                                        finally
+                                        {
+                                            player.Dispose();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Try with the specific logical name format used in ConfigReplacer
+                        string assemblyName = assembly.GetName().Name;
+                        string logicalName = $"{assemblyName}.g.resources.app.sounds.{Path.GetFileName(resourcePath)}";
+                        Logger.Instance.LogInfo($"SoundPlayer: Trying with logical name: '{logicalName}'", true);
+
+                        using (var stream = assembly.GetManifestResourceStream(logicalName))
+                        {
+                            if (stream != null)
+                            {
+                                System.Media.SoundPlayer player = new System.Media.SoundPlayer(stream);
+                                try
+                                {
+                                    player.Play();
+                                    Logger.Instance.LogInfo($"SoundPlayer: Successfully played sound with logical name: '{logicalName}'", true);
+                                    return true;
+                                }
+                                finally
+                                {
+                                    player.Dispose();
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Instance.LogWarning($"SoundPlayer: Error trying custom resource names: {ex.Message}", true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Instance.LogWarning($"SoundPlayer: Error reading direct resource: {ex.Message}", true);
+                }
+
+                // Fall back to the original method if the above didn't work
+                Stream resourceStream = assembly.GetManifestResourceStream(resourcePath);
+                if (resourceStream == null)
+                {
+                    Logger.Instance.LogWarning($"SoundPlayer: Stream is null for resource path: '{resourcePath}'", true);
+                    return false;
+                }
+
+                Logger.Instance.LogInfo($"SoundPlayer: Got stream for resource path: '{resourcePath}', length: {resourceStream.Length} bytes", true);
+
+                try
+                {
+                    Logger.Instance.LogInfo($"SoundPlayer: Creating SoundPlayer for resource: '{resourcePath}'", true);
+                    System.Media.SoundPlayer player = new System.Media.SoundPlayer(resourceStream);
+                    try
+                    {
+                        Logger.Instance.LogInfo($"SoundPlayer: Playing embedded sound: '{resourcePath}'", true);
                         player.Play();
+                        Logger.Instance.LogInfo($"SoundPlayer: Successfully played embedded sound: '{resourcePath}'", true);
+                        return true;
                     }
                     finally
                     {
                         player.Dispose();
                     }
-#endif
                 }
-                else
+                finally
                 {
-                    // Try looking for the file in the application directory as fallback
-                    string fallbackPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, soundPath);
-                    if (File.Exists(fallbackPath))
-                    {
-#if NET6_0_OR_GREATER
-                        using (var player = new System.Media.SoundPlayer(fallbackPath))
-                        {
-                            player.Play();
-                        }
-#else
-                        var player = new System.Media.SoundPlayer(fallbackPath);
-                        try
-                        {
-                            player.Play();
-                        }
-                        finally
-                        {
-                            player.Dispose();
-                        }
-#endif
-                    }
+                    resourceStream.Dispose();
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Silently continue if sound playback fails
+                Logger.Instance.LogWarning($"SoundPlayer: Failed to play embedded sound {resourcePath}: {ex.Message}", true);
+                Logger.Instance.LogWarning($"SoundPlayer: Exception details: {ex}", true);
+                return false;
+            }
+        }
+
+        private static bool TryPlayLocalSound(string soundPath)
+        {
+            try
+            {
+                Logger.Instance.LogInfo($"SoundPlayer: TryPlayLocalSound called with path: '{soundPath}'", true);
+
+                // Check if this is a WPF resource URI
+                if (soundPath.StartsWith("pack://"))
+                {
+                    try
+                    {
+                        Logger.Instance.LogInfo($"SoundPlayer: Detected WPF resource URI: '{soundPath}'", true);
+
+                        // Create a URI from the path
+                        Uri resourceUri = new Uri(soundPath);
+                        Logger.Instance.LogInfo($"SoundPlayer: Created URI: '{resourceUri}'", true);
+
+                        // Open a stream to the resource
+                        var streamResourceInfo = System.Windows.Application.GetResourceStream(resourceUri);
+                        if (streamResourceInfo != null && streamResourceInfo.Stream != null)
+                        {
+                            Logger.Instance.LogInfo($"SoundPlayer: Got stream for WPF resource: '{soundPath}', length: {streamResourceInfo.Stream.Length} bytes", true);
+
+                            // Play the sound
+                            using (Stream stream = streamResourceInfo.Stream)
+                            {
+                                System.Media.SoundPlayer wpfPlayer = new System.Media.SoundPlayer(stream);
+                                try
+                                {
+                                    Logger.Instance.LogInfo($"SoundPlayer: Playing WPF resource sound: '{soundPath}'", true);
+                                    wpfPlayer.Play();
+                                    Logger.Instance.LogInfo($"SoundPlayer: Successfully played WPF resource sound: '{soundPath}'", true);
+                                    return true;
+                                }
+                                finally
+                                {
+                                    wpfPlayer.Dispose();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Logger.Instance.LogWarning($"SoundPlayer: Failed to get stream for WPF resource: '{soundPath}'", true);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Instance.LogWarning($"SoundPlayer: Failed to play WPF resource sound {soundPath}: {ex.Message}", true);
+                        Logger.Instance.LogWarning($"SoundPlayer: Exception details: {ex}", true);
+                    }
+                }
+
+                // Fall back to regular file path
+                string path = File.Exists(soundPath) ? soundPath : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, soundPath);
+                Logger.Instance.LogInfo($"SoundPlayer: Resolved local path: '{path}'", true);
+
+                if (!File.Exists(path))
+                {
+                    Logger.Instance.LogWarning($"SoundPlayer: Local file not found: '{path}'", true);
+                    return false;
+                }
+
+                Logger.Instance.LogInfo($"SoundPlayer: Local file exists: '{path}'", true);
+                System.Media.SoundPlayer player = new System.Media.SoundPlayer(path);
+                try
+                {
+                    Logger.Instance.LogInfo($"SoundPlayer: Playing local sound: '{path}'", true);
+                    player.Play();
+                    Logger.Instance.LogInfo($"SoundPlayer: Successfully played local sound: '{path}'", true);
+                    return true;
+                }
+                finally
+                {
+                    player.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.LogWarning($"SoundPlayer: Failed to play local sound {soundPath}: {ex.Message}", true);
+                Logger.Instance.LogWarning($"SoundPlayer: Exception details: {ex}", true);
+                return false;
             }
         }
     }

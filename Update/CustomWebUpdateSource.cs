@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 #endif
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Common.Logging;
 #if NET48
@@ -39,7 +40,6 @@ namespace Common.Update
             _apiKey = apiKey;
 
 #if NET48
-            // Set up headers for WebClient
             if (!string.IsNullOrEmpty(_apiKey))
             {
                 _webClient.Headers.Add("X-API-Key", _apiKey);
@@ -61,46 +61,41 @@ namespace Common.Update
                 _logger.LogInfo($"Checking for updates for {applicationName} v{currentVersion} from custom source: {_updateCheckUrl}");
 
 #if NET48
-                // Set up WebClient for .NET Framework 4.8
                 _webClient.Headers["X-Application-Name"] = applicationName;
                 _webClient.Headers["X-Application-Version"] = currentVersion.ToString();
-
-                // Download the response
                 string json = await _webClient.DownloadStringTaskAsync(_updateCheckUrl);
-
-                // Parse JSON using Newtonsoft.Json
                 using (var reader = new StringReader(json))
                 using (var jsonReader = new JsonTextReader(reader))
                 {
                     var root = JObject.Load(jsonReader);
-
-                    // Check if an update is available
                     if (root["updateAvailable"] != null && (bool)root["updateAvailable"])
                     {
-                        // Parse version
                         string versionString = root["version"].ToString();
                         Version latestVersion = Version.Parse(versionString);
-
-                        // Extract update information
                         string downloadUrl = root["downloadUrl"].ToString();
                         string releaseUrl = root["releaseUrl"].ToString();
                         string releaseNotes = root["releaseNotes"].ToString();
                         bool isMandatory = root["isMandatory"] != null && (bool)root["isMandatory"];
-
-                        // Parse published date if available
                         DateTime? publishedDate = null;
                         if (root["publishedDate"] != null)
                         {
                             publishedDate = DateTime.Parse(root["publishedDate"].ToString());
                         }
-
+                        string sha256 = "";
+                        var sha256Match = Regex.Match(releaseNotes, @"SHA256:\s*([0-9A-Fa-f]{64})");
+                        if (sha256Match.Success)
+                        {
+                            sha256 = sha256Match.Groups[1].Value;
+                        }
                         return new UpdateInfo(
                             latestVersion,
                             downloadUrl,
                             releaseUrl,
                             releaseNotes,
+                            sha256,
                             isMandatory,
-                            publishedDate
+                            publishedDate,
+                            true
                         );
                     }
                     else
@@ -110,56 +105,47 @@ namespace Common.Update
                     }
                 }
 #else
-                // Create the request
                 var request = new HttpRequestMessage(HttpMethod.Get, _updateCheckUrl);
-
-                // Add API key if provided
                 if (!string.IsNullOrEmpty(_apiKey))
                 {
                     request.Headers.Add("X-API-Key", _apiKey);
                 }
-
-                // Add application info
                 request.Headers.Add("X-Application-Name", applicationName);
                 request.Headers.Add("X-Application-Version", currentVersion.ToString());
-
-                // Send the request
                 var response = await _httpClient.SendAsync(request);
                 response.EnsureSuccessStatusCode();
-
-                // Parse the response
                 string json = await response.Content.ReadAsStringAsync();
                 using (JsonDocument doc = JsonDocument.Parse(json))
                 {
                     var root = doc.RootElement;
-
-                    // Check if an update is available
                     if (root.TryGetProperty("updateAvailable", out var updateAvailable) && updateAvailable.GetBoolean())
                     {
-                        // Parse version
                         string versionString = root.GetProperty("version").GetString();
                         Version latestVersion = Version.Parse(versionString);
-
-                        // Extract update information
                         string downloadUrl = root.GetProperty("downloadUrl").GetString();
                         string releaseUrl = root.GetProperty("releaseUrl").GetString();
                         string releaseNotes = root.GetProperty("releaseNotes").GetString();
                         bool isMandatory = root.GetProperty("isMandatory").GetBoolean();
-
-                        // Parse published date if available
                         DateTime? publishedDate = null;
                         if (root.TryGetProperty("publishedDate", out var publishedDateElement))
                         {
                             publishedDate = DateTime.Parse(publishedDateElement.GetString());
                         }
-
+                        string sha256 = "";
+                        var sha256Match = Regex.Match(releaseNotes, @"SHA256:\s*([0-9A-Fa-f]{64})");
+                        if (sha256Match.Success)
+                        {
+                            sha256 = sha256Match.Groups[1].Value;
+                        }
                         return new UpdateInfo(
                             latestVersion,
                             downloadUrl,
                             releaseUrl,
                             releaseNotes,
+                            sha256,
                             isMandatory,
-                            publishedDate
+                            publishedDate,
+                            true
                         );
                     }
                     else

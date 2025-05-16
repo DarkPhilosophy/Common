@@ -22,10 +22,10 @@ namespace Common.UI.Animation
     public class AnimationManager
     {
         // Singleton instance
-#if NET6_0_OR_GREATER
-        private static AnimationManager? _instance;
-#else
+#if NET48
         private static AnimationManager _instance;
+#else
+        private static AnimationManager? _instance;
 #endif
 
         // Dictionary to track active animations
@@ -33,6 +33,9 @@ namespace Common.UI.Animation
 
         // Dictionary to store original button colors for red buttons
         private readonly Dictionary<Button, SolidColorBrush> _originalButtonColors = new Dictionary<Button, SolidColorBrush>();
+
+        // Flag to enable/disable animations globally
+        public bool AnimationsEnabled { get; set; } = true;
 
         // Button colors - create with identical properties to ensure consistent sizing
         public static readonly SolidColorBrush BlueColor = CreateButtonBrush(0x21, 0x96, 0xF3); // #2196F3
@@ -48,14 +51,14 @@ namespace Common.UI.Animation
         {
             get
             {
-#if NET6_0_OR_GREATER
-                return _instance ??= new AnimationManager();
-#else
+#if NET48
                 if (_instance == null)
                 {
                     _instance = new AnimationManager();
                 }
                 return _instance;
+#else
+                return _instance ??= new AnimationManager();
 #endif
             }
         }
@@ -73,10 +76,10 @@ namespace Common.UI.Animation
         public class AnimationConfig
         {
             public AnimationType Type { get; set; } = AnimationType.Glow;
-#if NET6_0_OR_GREATER
-            public Brush? TargetBrush { get; set; } // SolidColorBrush or GradientBrush
-#else
+#if NET48
             public Brush TargetBrush { get; set; } = new SolidColorBrush(Colors.Blue); // Default value
+#else
+            public Brush? TargetBrush { get; set; } // SolidColorBrush or GradientBrush
 #endif
             public double DurationSeconds { get; set; } = 0.8;
             public double From { get; set; } // Starting value (e.g., blur radius, scale)
@@ -101,12 +104,12 @@ namespace Common.UI.Animation
         /// </summary>
         private class AnimationState
         {
-#if NET6_0_OR_GREATER
-            public AnimationConfig? Config { get; set; }
-            public Storyboard? Storyboard { get; set; }
-#else
+#if NET48
             public AnimationConfig Config { get; set; } = new AnimationConfig();
             public Storyboard Storyboard { get; set; } = new Storyboard();
+#else
+            public AnimationConfig? Config { get; set; }
+            public Storyboard? Storyboard { get; set; }
 #endif
             public bool IsRunning { get; set; }
         }
@@ -170,6 +173,14 @@ namespace Common.UI.Animation
         {
             try
             {
+                // Skip animations if globally disabled
+                if (!AnimationsEnabled)
+                {
+                    // Just clean up any existing animations
+                    StopAnimations(button);
+                    return;
+                }
+
                 StopAnimations(button); // Clear existing animations
 
                 var storyboard = new Storyboard();
@@ -301,15 +312,15 @@ namespace Common.UI.Animation
                     return opacityAnim;
 
                 default:
-#if NET6_0_OR_GREATER
-                    return null;
-#else
+#if NET48
                     // Return a dummy animation that does nothing instead of null
                     var dummyAnim = new DoubleAnimation
                     {
                         Duration = TimeSpan.FromSeconds(0.1)
                     };
                     return dummyAnim;
+#else
+                    return null;
 #endif
             }
         }
