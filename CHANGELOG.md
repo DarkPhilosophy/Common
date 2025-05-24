@@ -2,7 +2,7 @@
 
 ## Română
 
-### [1.0.2.0] - 2023-06-15
+### [1.0.2.0] - 2025-05-24
 
 #### Adăugat
 - Sistem de animații îmbunătățit pentru butoane cu suport pentru efecte multiple simultane
@@ -41,7 +41,7 @@
 
 ## English
 
-### [1.0.2.0] - 2023-06-15
+### [1.0.2.0] - 2025-05-24
 
 #### Added
 - Enhanced button animation system with support for multiple simultaneous effects
